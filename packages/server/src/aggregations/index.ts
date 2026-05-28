@@ -5,7 +5,7 @@
  *   import { anonymitySet } from "@strk20/server/aggregations/anonymity-set";
  *   import { currentTvl }   from "@strk20/server/aggregations/tvl";
  *
- * All functions take a `Database` handle (better-sqlite3) plus a chain id +
+ * All functions take a `Db` handle (node:sqlite) plus a chain id +
  * contract address, so they're trivially mountable in any server framework.
  */
 

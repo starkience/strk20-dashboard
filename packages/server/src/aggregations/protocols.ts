@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Db } from "../cache/db.js";
 import {
   EVENT_SELECTORS,
   PROTOCOLS,
@@ -27,7 +27,7 @@ export interface ProtocolActivity {
  * For Withdrawals → topic1 is `to_addr` (destination, often a router)
  */
 export function activeProtocols(
-  db: Database.Database,
+  db: Db,
   chain: string,
   contract: string
 ): ProtocolActivity[] {
@@ -99,7 +99,7 @@ export interface TopCaller {
  * addresses to add to PROTOCOLS in the data-client address book.
  */
 export function topCallers(
-  db: Database.Database,
+  db: Db,
   chain: string,
   contract: string,
   limit = 25

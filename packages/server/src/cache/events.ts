@@ -1,21 +1,20 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync, StatementSync } from "node:sqlite";
 import type { RawContractEvent } from "@strk20/core";
 
 export class EventCache {
-  private readonly insertStmt: Database.Statement;
-  private readonly countByTopicStmt: Database.Statement;
-  private readonly countSinceBlockStmt: Database.Statement;
-  private readonly latestBlockStmt: Database.Statement;
-  private readonly upsertSyncStmt: Database.Statement;
-  private readonly readSyncStmt: Database.Statement;
+  private readonly insertStmt: StatementSync;
+  private readonly countByTopicStmt: StatementSync;
+  private readonly countSinceBlockStmt: StatementSync;
+  private readonly latestBlockStmt: StatementSync;
+  private readonly upsertSyncStmt: StatementSync;
+  private readonly readSyncStmt: StatementSync;
 
-  constructor(private readonly db: Database.Database) {
+  constructor(private readonly db: DatabaseSync) {
     this.insertStmt = db.prepare(`
       INSERT OR IGNORE INTO raw_events
         (chain, contract, block_number, tx_index, log_index, tx_hash,
          timestamp_iso, topic0, topic1, topic2, topic3, data_json)
-      VALUES (@chain, @contract, @blockNumber, @txIndex, @logIndex, @txHash,
-              @timestampIso, @topic0, @topic1, @topic2, @topic3, @dataJson)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     this.countByTopicStmt = db.prepare(`
@@ -34,48 +33,57 @@ export class EventCache {
     `);
 
     this.upsertSyncStmt = db.prepare(`
-      INSERT INTO sync_state (chain, contract, last_synced_block, last_cursor, updated_at)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO sync_state
+        (chain, contract, last_synced_block, last_cursor, backfill_complete, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(chain, contract) DO UPDATE SET
         last_synced_block = excluded.last_synced_block,
         last_cursor       = excluded.last_cursor,
+        backfill_complete = excluded.backfill_complete,
         updated_at        = excluded.updated_at
     `);
 
     this.readSyncStmt = db.prepare(`
-      SELECT last_synced_block, last_cursor, updated_at
+      SELECT last_synced_block, last_cursor, backfill_complete, updated_at
       FROM sync_state WHERE chain = ? AND contract = ?
     `);
   }
 
   insertMany(chain: string, contract: string, events: RawContractEvent[]): number {
-    const insert = this.db.transaction((rows: RawContractEvent[]) => {
-      let inserted = 0;
-      for (const e of rows) {
-        const r = this.insertStmt.run({
+    if (events.length === 0) return 0;
+    this.db.exec("BEGIN");
+    let inserted = 0;
+    try {
+      for (const e of events) {
+        const r = this.insertStmt.run(
           chain,
           contract,
-          blockNumber: e.blockNumber,
-          txIndex: e.txIndex,
-          logIndex: e.logIndex,
-          txHash: e.txHash,
-          timestampIso: e.timestampIso,
-          topic0: e.topic0,
-          topic1: e.topic1,
-          topic2: e.topic2,
-          topic3: e.topic3,
-          dataJson: JSON.stringify(e.data),
-        });
-        inserted += r.changes;
+          e.blockNumber,
+          e.txIndex,
+          e.logIndex,
+          e.txHash,
+          e.timestampIso,
+          e.topic0,
+          e.topic1,
+          e.topic2,
+          e.topic3,
+          JSON.stringify(e.data)
+        );
+        inserted += Number(r.changes);
       }
-      return inserted;
-    });
-    return insert(events);
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+    return inserted;
   }
 
   countByTopic(chain: string, contract: string, topic0: string): number {
-    const row = this.countByTopicStmt.get(chain, contract, topic0) as { n: number };
-    return row?.n ?? 0;
+    const row = this.countByTopicStmt.get(chain, contract, topic0) as
+      | { n: number }
+      | undefined;
+    return Number(row?.n ?? 0);
   }
 
   countSinceBlock(
@@ -84,31 +92,32 @@ export class EventCache {
     topic0: string,
     sinceBlock: number
   ): number {
-    const row = this.countSinceBlockStmt.get(
-      chain,
-      contract,
-      topic0,
-      sinceBlock
-    ) as { n: number };
-    return row?.n ?? 0;
+    const row = this.countSinceBlockStmt.get(chain, contract, topic0, sinceBlock) as
+      | { n: number }
+      | undefined;
+    return Number(row?.n ?? 0);
   }
 
   latestBlock(chain: string, contract: string): number | null {
-    const row = this.latestBlockStmt.get(chain, contract) as { block: number | null };
-    return row?.block ?? null;
+    const row = this.latestBlockStmt.get(chain, contract) as
+      | { block: number | null }
+      | undefined;
+    return row?.block != null ? Number(row.block) : null;
   }
 
   recordSyncState(
     chain: string,
     contract: string,
     lastSyncedBlock: number | null,
-    lastCursor: string | null
+    lastCursor: string | null,
+    backfillComplete: boolean
   ): void {
     this.upsertSyncStmt.run(
       chain,
       contract,
       lastSyncedBlock,
       lastCursor,
+      backfillComplete ? 1 : 0,
       Date.now()
     );
   }
@@ -116,14 +125,23 @@ export class EventCache {
   readSyncState(
     chain: string,
     contract: string
-  ): { lastSyncedBlock: number | null; lastCursor: string | null } | null {
+  ): {
+    lastSyncedBlock: number | null;
+    lastCursor: string | null;
+    backfillComplete: boolean;
+  } | null {
     const row = this.readSyncStmt.get(chain, contract) as
-      | { last_synced_block: number | null; last_cursor: string | null }
+      | {
+          last_synced_block: number | null;
+          last_cursor: string | null;
+          backfill_complete: number;
+        }
       | undefined;
     if (!row) return null;
     return {
-      lastSyncedBlock: row.last_synced_block,
+      lastSyncedBlock: row.last_synced_block != null ? Number(row.last_synced_block) : null,
       lastCursor: row.last_cursor,
+      backfillComplete: Number(row.backfill_complete) === 1,
     };
   }
 }

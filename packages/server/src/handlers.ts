@@ -19,7 +19,7 @@ import {
   type StarkscanClient,
 } from "@strk20/core";
 import type { EventCache, ViewCache } from "./cache/index.js";
-import type Database from "better-sqlite3";
+import type { Db } from "./cache/db.js";
 import { syncContractEvents } from "./sync.js";
 import { anonymitySet } from "./aggregations/anonymity-set.js";
 import { privateOpsSince } from "./aggregations/private-ops.js";
@@ -34,7 +34,7 @@ import { activeProtocols, topCallers } from "./aggregations/protocols.js";
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface HandlerDeps {
-  db: Database.Database;
+  db: Db;
   events: EventCache;
   views: ViewCache;
   starkscan: StarkscanClient;
@@ -156,8 +156,8 @@ export function createHandlers(deps: HandlerDeps) {
         ? `SELECT * FROM raw_events WHERE chain=? AND contract=? AND topic0=? ORDER BY block_number DESC LIMIT ?`
         : `SELECT * FROM raw_events WHERE chain=? AND contract=? ORDER BY block_number DESC LIMIT ?`;
       const rows = sel
-        ? (db.prepare(sql).all(chain, pool, sel, limit) as DbEventRow[])
-        : (db.prepare(sql).all(chain, pool, limit) as DbEventRow[]);
+        ? (db.prepare(sql).all(chain, pool, sel, limit) as unknown as DbEventRow[])
+        : (db.prepare(sql).all(chain, pool, limit) as unknown as DbEventRow[]);
       const decoded = rows.map((r) => decodeEvent(rowToRaw(r, pool)));
       return {
         decoded: decoded.map((e) => ({

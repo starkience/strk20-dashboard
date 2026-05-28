@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Db } from "../cache/db.js";
 import { EVENT_SELECTORS } from "@strk20/core";
 
 export interface DistinctDepositors {
@@ -7,7 +7,7 @@ export interface DistinctDepositors {
 
 /** Count of distinct depositor addresses across all-time Deposit events. */
 export function distinctDepositorsAllTime(
-  db: Database.Database,
+  db: Db,
   chain: string,
   contract: string
 ): DistinctDepositors {
@@ -28,7 +28,7 @@ export interface ActiveDepositors {
 
 /** Distinct addresses that made a Deposit at or after the cutoff. */
 export function activeDepositorsSince(
-  db: Database.Database,
+  db: Db,
   chain: string,
   contract: string,
   sinceMs: number

@@ -79,6 +79,39 @@ serve({ fetch: app.fetch, port: PORT }, (info) => {
   console.log(`  cache=${CACHE_PATH}`);
 });
 
+// Auto-sync: backfill the full history on boot, then poll the head on an
+// interval. Set BACKFILL_ON_START=false to skip the initial walk, or
+// SYNC_INTERVAL_MS to tune the poll cadence. Non-blocking — the server serves
+// immediately and the cache fills in as the walk progresses.
+const SYNC_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS ?? 120_000);
+const BACKFILL_ON_START = process.env.BACKFILL_ON_START !== "false";
+
+async function runAutoSync() {
+  if (BACKFILL_ON_START) {
+    console.log("sync: backfilling history…");
+    for (let pass = 1; ; pass++) {
+      const r = await h.sync({ maxPages: 50 });
+      console.log(
+        `sync[${r.phase}] pass ${pass}: +${r.eventsInserted} (head ${r.lastBlock ?? "—"})`
+      );
+      if (r.backfillComplete || r.eventsInserted === 0) break;
+    }
+    console.log("sync: backfill complete");
+  }
+  setInterval(async () => {
+    try {
+      const r = await h.sync({ maxPages: 50 });
+      if (r.eventsInserted > 0) {
+        console.log(`sync[${r.phase}]: +${r.eventsInserted} (head ${r.lastBlock ?? "—"})`);
+      }
+    } catch (e) {
+      console.error("sync error:", (e as Error).message);
+    }
+  }, SYNC_INTERVAL_MS);
+}
+
+runAutoSync().catch((e) => console.error("auto-sync failed:", e));
+
 function required(key: string): string {
   const v = process.env[key];
   if (!v) {

@@ -1,6 +1,14 @@
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+
+/**
+ * Uses Node's built-in SQLite (node:sqlite, stable file format, ships with
+ * Node 22+). No native build step — drops the better-sqlite3 toolchain
+ * requirement entirely. `node:sqlite` is still flagged experimental; we pin
+ * Node 24 in .nvmrc.
+ */
+export type Db = DatabaseSync;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS raw_events (
@@ -30,6 +38,7 @@ CREATE TABLE IF NOT EXISTS sync_state (
   contract           TEXT NOT NULL,
   last_synced_block  INTEGER,
   last_cursor        TEXT,
+  backfill_complete  INTEGER NOT NULL DEFAULT 0,
   updated_at         INTEGER NOT NULL,
   PRIMARY KEY (chain, contract)
 );
@@ -44,11 +53,11 @@ CREATE INDEX IF NOT EXISTS idx_view_cache_expires
   ON view_cache(expires_at);
 `;
 
-export function openCache(path: string): Database.Database {
+export function openCache(path: string): DatabaseSync {
   mkdirSync(dirname(path), { recursive: true });
-  const db = new Database(path);
-  db.pragma("journal_mode = WAL");
-  db.pragma("synchronous = NORMAL");
+  const db = new DatabaseSync(path);
+  db.exec("PRAGMA journal_mode = WAL;");
+  db.exec("PRAGMA synchronous = NORMAL;");
   db.exec(SCHEMA);
   return db;
 }

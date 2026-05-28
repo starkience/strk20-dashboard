@@ -1,12 +1,12 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync, StatementSync } from "node:sqlite";
 
 /** Generic key/value cache with TTL for view-function results. */
 export class ViewCache {
-  private readonly getStmt: Database.Statement;
-  private readonly putStmt: Database.Statement;
-  private readonly purgeStmt: Database.Statement;
+  private readonly getStmt: StatementSync;
+  private readonly putStmt: StatementSync;
+  private readonly purgeStmt: StatementSync;
 
-  constructor(db: Database.Database) {
+  constructor(db: DatabaseSync) {
     this.getStmt = db.prepare(`
       SELECT value_json, expires_at FROM view_cache WHERE key = ?
     `);
@@ -27,7 +27,7 @@ export class ViewCache {
       | { value_json: string; expires_at: number }
       | undefined;
     if (!row) return null;
-    if (row.expires_at < Date.now()) return null;
+    if (Number(row.expires_at) < Date.now()) return null;
     return JSON.parse(row.value_json) as T;
   }
 
@@ -36,6 +36,6 @@ export class ViewCache {
   }
 
   purgeExpired(): number {
-    return this.purgeStmt.run(Date.now()).changes;
+    return Number(this.purgeStmt.run(Date.now()).changes);
   }
 }

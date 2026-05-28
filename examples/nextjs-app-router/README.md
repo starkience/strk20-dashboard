@@ -30,11 +30,15 @@ Router) site.
    STRK20_POOL_ADDRESS=0x040337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a
    CACHE_DB_PATH=./data/strk20-cache.db
    ```
-4. **Run the sync once** to backfill events:
+4. **Backfill the cache.** The standalone server (`pnpm dev:server`) auto-syncs
+   on boot. In this catch-all-route setup there's no long-running boot, so kick
+   the first backfill manually, then it stays warm:
    ```bash
+   # repeat until eventsInserted is 0 (full history walk)
    curl -X POST http://localhost:3000/api/strk20/sync
    ```
-   Repeat periodically (or wire a cron) to keep the cache fresh.
+   For production, run the standalone `@strk20/server` (which auto-backfills +
+   polls) or wire a scheduled function to hit `/sync`.
 5. **Open `/pool`** in your browser.
 
 ## Cherry-picking modules
@@ -81,17 +85,16 @@ Same for `<AnonymitySet data={…} />`, `<ShieldedTVL data={…} />`, etc.
 
 ## Replacing the SQLite cache
 
-The default cache is SQLite (via `better-sqlite3`). To swap for Postgres or
-something else, replace the `EventCache` / `ViewCache` implementations in
-`@strk20/server/cache` with your own classes that expose the same methods, then
-pass them to `createHandlers`.
+The default cache uses Node's built-in `node:sqlite` (no native build). To swap
+for Postgres or something else, replace the `EventCache` / `ViewCache`
+implementations in `@strk20/server/cache` with your own classes that expose the
+same methods, then pass them to `createHandlers`.
 
 ## Notes
 
 - `app/pool/page.tsx` is a Client Component (`"use client"`) because the
   dashboard components poll the API. If you want the page server-rendered, wrap
   the Dashboard with `dynamic(() => import("…"), { ssr: false })` instead.
-- The catch-all API route runs in the Node runtime by default. `better-sqlite3`
-  is a native module — confirm your Next.js project uses Node runtime, not Edge,
-  for routes under `/api/strk20/*`.
+- The catch-all API route must run in the **Node runtime** (not Edge) — it uses
+  `node:sqlite`. Requires **Node 24**.
 - Don't expose `STARKSCAN_API_KEY` to the client — it must stay server-side.

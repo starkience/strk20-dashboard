@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Db } from "../cache/db.js";
 import { EVENT_SELECTORS } from "@strk20/core";
 import { countByTopic } from "./_helpers.js";
 
@@ -10,7 +10,7 @@ export interface AnonymitySet {
 
 /** Anonymity set = note commitments created minus nullifiers (spent notes). */
 export function anonymitySet(
-  db: Database.Database,
+  db: Db,
   chain: string,
   contract: string
 ): AnonymitySet {

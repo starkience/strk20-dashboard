@@ -35,10 +35,10 @@ import { Dashboard, Strk20Provider } from "@strk20/dashboard";
 </Strk20Provider>
 ```
 
-Deploy the server (Hono, Node) wherever you like. It needs:
+Deploy the server (Hono, Node 24) wherever you like. It needs:
 - `STARKSCAN_API_KEY` env
 - Persistent disk for the SQLite cache (or override `CACHE_DB_PATH`)
-- A cron / loop that POSTs to `/sync` periodically to keep the cache fresh
+- Nothing else — it **auto-syncs**: backfills the full history on boot, then polls the head every `SYNC_INTERVAL_MS` (default 2 min). No cron required.
 
 ### B. Embedded in your Next.js app (recommended)
 
@@ -56,7 +56,7 @@ inside your own app instead of an external service.
 
 **Layout level (UI):**
 - Drop in `<Dashboard />` for the full thing
-- Or cherry-pick: `<PoolConstellation />`, `<AnonymitySet />`, `<ShieldedTVL />`, `<NoteAgeHistogram />`, `<PrivateOperations />`, `<ActiveDepositors />`, `<VisibilityTable />`
+- Or cherry-pick: `<PoolOverview />`, `<AnonymitySet />`, `<ShieldedTVL />`, `<NoteAgeHistogram />`, `<PrivateOperations />`, `<ActiveDepositors />`, `<VisibilityTable />`
 - Each module takes an optional `data={…}` prop if he wants to pipe in his own data source
 
 **Data level (server):**
@@ -75,12 +75,26 @@ inside your own app instead of an external service.
 
 ## Sync strategy
 
-The cache is populated by `POST /sync` (incremental: only fetches events newer
-than the cached high-water block). Production setup:
+**Automatic.** On boot the server backfills the full event history (two-phase:
+walks newest→oldest until done, persisting a cursor so restarts don't re-walk),
+then polls the head every `SYNC_INTERVAL_MS` (default 2 min). The dashboard
+fills in as the backfill progresses — a busy contract can take several minutes
+for the first full walk, self-throttled against the Starkscan rate limit.
 
-- On first deploy, run `POST /sync` repeatedly until `eventsInserted` returns 0
-  (full backfill — can take 10+ minutes for a busy contract)
-- Then run `POST /sync` every 1–5 minutes via cron / Vercel Cron / etc.
+Controls:
+- `BACKFILL_ON_START=false` — skip the initial walk (head-only)
+- `SYNC_INTERVAL_MS` — poll cadence
+- `POST /sync` still exists for a manual nudge
+
+Embedded in Next.js, the catch-all route's module-load init kicks off the same
+backfill the first time the route is hit. (For serverless you may prefer a
+dedicated long-running server or a scheduled function — see notes below.)
+
+## Prerequisites
+
+- **Node 24** (`.nvmrc`) — the cache uses the built-in `node:sqlite`, so there's
+  **no native build step and no C toolchain required**.
+- **pnpm** — the workspace uses the `workspace:*` protocol (npm/yarn won't resolve it).
 
 TVL (the most live metric) is computed from on-chain `balance-of` queries with a
 60s server-side cache, so it stays fresh independent of event sync cadence.

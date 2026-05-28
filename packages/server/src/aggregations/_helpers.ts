@@ -1,9 +1,9 @@
-import type Database from "better-sqlite3";
+import type { Db } from "../cache/db.js";
 
 /** Shared SQL helpers used by multiple aggregation modules. */
 
 export function countByTopic(
-  db: Database.Database,
+  db: Db,
   chain: string,
   contract: string,
   topic0: string
@@ -18,7 +18,7 @@ export function countByTopic(
 }
 
 export function countByTopicSinceIso(
-  db: Database.Database,
+  db: Db,
   chain: string,
   contract: string,
   topic0: string,

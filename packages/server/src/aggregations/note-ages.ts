@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Db } from "../cache/db.js";
 import { EVENT_SELECTORS } from "@strk20/core";
 
 export type AgeTier = "fresh" | "young" | "mature" | "veteran";
@@ -20,7 +20,7 @@ const WEEK = 7 * DAY;
  * we don't link a nullifier back to its commitment without a proof.
  */
 export function noteAgeBuckets(
-  db: Database.Database,
+  db: Db,
   chain: string,
   contract: string
 ): NoteAgeBuckets {

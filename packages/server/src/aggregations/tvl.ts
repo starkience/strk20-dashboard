@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Db } from "../cache/db.js";
 import {
   EVENT_SELECTORS,
   KNOWN_TOKENS,
@@ -45,7 +45,7 @@ const TVL_TTL_MS = 60_000;
  */
 export async function currentTvl(
   client: StarkscanClient,
-  db: Database.Database,
+  db: Db,
   views: ViewCache,
   chain: string,
   pool: string
@@ -104,7 +104,7 @@ export async function currentTvl(
 }
 
 function depositWithdrawCountsByToken(
-  db: Database.Database,
+  db: Db,
   chain: string,
   pool: string
 ): Map<string, { depositCount: number; withdrawalCount: number }> {

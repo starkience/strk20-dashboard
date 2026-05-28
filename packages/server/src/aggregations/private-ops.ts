@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Db } from "../cache/db.js";
 import { EVENT_SELECTORS } from "@strk20/core";
 import { countByTopicSinceIso } from "./_helpers.js";
 
@@ -10,7 +10,7 @@ export interface PrivateOpsCount {
 
 /** Count of internal pool activity (note creations + spends) since a wall-clock ms timestamp. */
 export function privateOpsSince(
-  db: Database.Database,
+  db: Db,
   chain: string,
   contract: string,
   sinceMs: number
