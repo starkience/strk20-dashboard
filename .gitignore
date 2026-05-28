@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.env
+.env.local
+*.log
+.DS_Store
+.cache/
+.turbo/
+*.tsbuildinfo
+
+# SQLite cache (generated; anywhere in the tree)
+**/data/
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
