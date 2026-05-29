@@ -1,15 +1,20 @@
 import { useApi } from "../lib/use-api.js";
 import { Row } from "../lib/Row.js";
+import { Disclosure } from "../lib/Disclosure.js";
 
 export interface ShieldedTVLToken {
   address: string;
   symbol: string;
   decimals: number;
+  logoUri: string | null;
+  coingeckoId: string | null;
   balanceRaw: string;
   balanceHuman: number;
   balanceUsd: number;
   depositCount: number;
   withdrawalCount: number;
+  priced: boolean;
+  identified: boolean;
 }
 
 export interface ShieldedTVLData {
@@ -41,10 +46,10 @@ export function ShieldedTVL({ data: dataProp }: ShieldedTVLProps = {}) {
   const fetched = useShieldedTVLData();
   const data = dataProp ?? fetched;
   return (
-    <div data-strk20-group>
-      <div data-strk20-group-label>
-        Shielded TVL · by asset{data ? ` · ${data.tokenCount} tokens` : ""}
-      </div>
+    <Disclosure
+      label="Tokens"
+      summary={data ? `${data.tokenCount}` : "—"}
+    >
       {!data && <Row label="loading…" value="—" />}
       {data?.perToken.map((t) => (
         <Row
@@ -54,6 +59,6 @@ export function ShieldedTVL({ data: dataProp }: ShieldedTVLProps = {}) {
           value={fmtBalance(t.balanceHuman)}
         />
       ))}
-    </div>
+    </Disclosure>
   );
 }

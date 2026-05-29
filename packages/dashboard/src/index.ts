@@ -3,17 +3,23 @@
 export { Dashboard } from "./Dashboard.js";
 export { Strk20Provider, useStrk20 } from "./lib/provider.js";
 export { Row } from "./lib/Row.js";
+export { Disclosure } from "./lib/Disclosure.js";
 
 // Individual modules + their data hooks + types — cherry-pickable.
 export {
   PoolOverview,
   usePoolOverviewData,
   type PoolOverviewProps,
-  type PoolOverviewData,
   type PoolSummary,
+} from "./modules/PoolOverview.js";
+
+export {
+  ActiveApps,
+  useActiveAppsData,
+  type ActiveAppsProps,
   type ProtocolActivity,
   type ProtocolsResponse,
-} from "./modules/PoolOverview.js";
+} from "./modules/ActiveApps.js";
 
 export {
   AnonymitySet,

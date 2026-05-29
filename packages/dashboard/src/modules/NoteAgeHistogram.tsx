@@ -1,5 +1,6 @@
 import { useApi } from "../lib/use-api.js";
 import { Row } from "../lib/Row.js";
+import { Disclosure } from "../lib/Disclosure.js";
 
 export interface NoteAgeHistogramData {
   fresh: number;
@@ -26,9 +27,9 @@ const TIERS = [
 export function NoteAgeHistogram({ data: dataProp }: NoteAgeHistogramProps = {}) {
   const fetched = useNoteAgeHistogramData();
   const data = dataProp ?? fetched;
+  const total = data ? data.fresh + data.young + data.mature + data.veteran : 0;
   return (
-    <div data-strk20-group>
-      <div data-strk20-group-label>Note ages</div>
+    <Disclosure label="Note ages" summary={data ? `${total.toLocaleString()}` : "—"}>
       {TIERS.map((t) => (
         <Row
           key={t.key}
@@ -37,6 +38,6 @@ export function NoteAgeHistogram({ data: dataProp }: NoteAgeHistogramProps = {})
           value={data ? data[t.key].toLocaleString() : "—"}
         />
       ))}
-    </div>
+    </Disclosure>
   );
 }

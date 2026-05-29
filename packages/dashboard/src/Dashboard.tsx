@@ -4,7 +4,7 @@ import { PrivateOperations } from "./modules/PrivateOperations.js";
 import { ActiveDepositors } from "./modules/ActiveDepositors.js";
 import { NoteAgeHistogram } from "./modules/NoteAgeHistogram.js";
 import { ShieldedTVL } from "./modules/ShieldedTVL.js";
-import { VisibilityTable } from "./modules/VisibilityTable.js";
+import { ActiveApps } from "./modules/ActiveApps.js";
 import { useApi } from "./lib/use-api.js";
 
 interface ApiHealth {
@@ -13,9 +13,8 @@ interface ApiHealth {
 }
 
 /**
- * Reference composition. Deliberately plain — white, Inter, sharp, every
- * variable on a horizontal row — so the data reads clearly and a host can
- * restyle or cherry-pick individual modules without fighting opinionated CSS.
+ * 25 / 75 split. Left rail stacks the metrics (many-variable ones collapse into
+ * dropdowns). Right pane is intentionally reserved blank for now.
  */
 export function Dashboard() {
   const { data: health } = useApi<ApiHealth>("/health", { pollMs: 15_000 });
@@ -28,18 +27,19 @@ export function Dashboard() {
         </span>
       </header>
 
-      <PoolOverview />
+      <div data-strk20-split>
+        <aside data-strk20-left>
+          <PoolOverview />
+          <AnonymitySet />
+          <ActiveDepositors />
+          <PrivateOperations />
+          <ShieldedTVL />
+          <NoteAgeHistogram />
+          <ActiveApps />
+        </aside>
 
-      <div data-strk20-group>
-        <div data-strk20-group-label>Activity</div>
-        <AnonymitySet />
-        <PrivateOperations />
-        <ActiveDepositors />
+        <main data-strk20-right aria-label="reserved" />
       </div>
-
-      <ShieldedTVL />
-      <NoteAgeHistogram />
-      <VisibilityTable />
     </div>
   );
 }

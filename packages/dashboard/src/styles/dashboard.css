@@ -12,23 +12,23 @@
   box-sizing: border-box;
 }
 
-/* ─── Layout: a single readable column ─── */
+/* ─── Shell ─── */
 
 [data-strk20="dashboard"] {
-  max-width: 880px;
-  margin: 0 auto;
-  padding: 0 24px 64px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
 [data-strk20="header"] {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  padding: 28px 0 18px;
+  padding: 18px 24px;
   border-bottom: 1px solid var(--strk20-border-strong);
 }
 [data-strk20="header"] h1 {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 400;
   letter-spacing: 0.01em;
   margin: 0;
@@ -39,25 +39,32 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* ─── Groups + horizontal rows ─── */
+/* ─── 25 / 75 split ─── */
 
-[data-strk20-group] {
-  margin-top: 36px;
+[data-strk20-split] {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 25% 75%;
+  min-height: 0;
 }
-[data-strk20-group-label] {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  color: var(--strk20-text-faint);
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--strk20-border-strong);
+
+[data-strk20-left] {
+  border-right: 1px solid var(--strk20-border-strong);
+  padding: 4px 20px 40px;
+  overflow-y: auto;
 }
+
+[data-strk20-right] {
+  /* reserved — intentionally blank for now */
+}
+
+/* ─── Horizontal rows ─── */
 
 [data-strk20-row] {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 24px;
+  gap: 16px;
   padding: 13px 0;
   border-bottom: 1px solid var(--strk20-border);
 }
@@ -68,7 +75,7 @@
 [data-strk20-row] .r {
   display: inline-flex;
   align-items: baseline;
-  gap: 16px;
+  gap: 12px;
 }
 [data-strk20-row] .ctx {
   font-size: 12px;
@@ -79,51 +86,69 @@
   font-size: 15px;
   color: var(--strk20-text);
   font-variant-numeric: tabular-nums;
-  min-width: 64px;
   text-align: right;
 }
 
-/* ─── Pool overview box: numbers left, apps right ─── */
+/* ─── Disclosure (dropdown) ─── */
 
-[data-strk20-card="pool-overview"] {
-  margin-top: 28px;
-  border: 1px solid var(--strk20-border-strong);
-}
-[data-strk20-overview-grid] {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-}
-[data-strk20-overview-col] {
-  padding: 18px 22px;
-}
-[data-strk20-overview-col]:first-child {
-  border-right: 1px solid var(--strk20-border);
-}
-[data-strk20-overview-col] [data-strk20-group-label] {
+[data-strk20-disclosure] {
   border-bottom: 1px solid var(--strk20-border);
-  margin-bottom: 6px;
 }
-[data-strk20-overview-col] [data-strk20-row]:last-child {
-  border-bottom: none;
+[data-strk20-disclosure-summary] {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 0;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
 }
-[data-strk20-app-flows] {
-  display: inline-flex;
-  gap: 14px;
+[data-strk20-disclosure-summary]::-webkit-details-marker {
+  display: none;
+}
+[data-strk20-disclosure-summary] .k {
+  font-size: 14px;
+  color: var(--strk20-text-muted);
+}
+[data-strk20-disclosure-summary] .k::before {
+  content: "+ ";
+  color: var(--strk20-text-faint);
+}
+[data-strk20-disclosure][open] [data-strk20-disclosure-summary] .k::before {
+  content: "– ";
+}
+[data-strk20-disclosure-summary] .v {
+  font-size: 14px;
+  color: var(--strk20-text);
   font-variant-numeric: tabular-nums;
+}
+[data-strk20-disclosure-body] {
+  padding: 2px 0 12px 14px;
+}
+/* rows inside a disclosure are tighter + lighter dividers */
+[data-strk20-disclosure-body] [data-strk20-row] {
+  padding: 9px 0;
+  border-bottom: 1px solid var(--strk20-border);
+}
+[data-strk20-disclosure-body] [data-strk20-row]:last-child {
+  border-bottom: none;
 }
 
 [data-strk20-note] {
   font-size: 11px;
   font-style: italic;
   color: var(--strk20-text-faint);
-  padding: 8px 0 4px;
+  padding: 8px 0 2px;
 }
 
-/* ─── Visibility table ─── */
-
-[data-strk20-card="visibility-table"] {
-  margin-top: 36px;
+[data-strk20-loading] {
+  color: var(--strk20-text-faint);
+  font-size: 13px;
 }
+
+/* ─── Visibility table (kept for the right pane later) ─── */
+
 [data-strk20-visibility] {
   width: 100%;
   border-collapse: collapse;
@@ -145,19 +170,14 @@
 [data-strk20-visibility] .yes { color: var(--strk20-text-muted); }
 [data-strk20-visibility] .no  { color: var(--strk20-text); }
 
-[data-strk20-loading] {
-  color: var(--strk20-text-faint);
-  font-size: 13px;
-}
+/* ─── Responsive: stack the split on narrow screens ─── */
 
-/* ─── Responsive ─── */
-
-@media (max-width: 640px) {
-  [data-strk20-overview-grid] {
+@media (max-width: 760px) {
+  [data-strk20-split] {
     grid-template-columns: 1fr;
   }
-  [data-strk20-overview-col]:first-child {
+  [data-strk20-left] {
     border-right: none;
-    border-bottom: 1px solid var(--strk20-border);
+    border-bottom: 1px solid var(--strk20-border-strong);
   }
 }
