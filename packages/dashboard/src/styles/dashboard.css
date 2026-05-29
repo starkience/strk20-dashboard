@@ -56,9 +56,9 @@
 
 [data-strk20-right] {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  padding: 40px;
+  padding: 28px 40px;
 }
 
 [data-strk20-circle-wrap] {
@@ -70,8 +70,8 @@
 
 [data-strk20-circle] {
   aspect-ratio: 1;
-  width: clamp(300px, 62vh, 640px);
-  max-width: 90%;
+  width: clamp(260px, 46vh, 460px);
+  max-width: 80%;
   border: 1px solid var(--strk20-text);
   border-radius: 50%;
   display: flex;
