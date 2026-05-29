@@ -4,7 +4,12 @@ import {
   lookupToken,
   applyDecimals,
   normalizeHex,
+  decodeTokenSymbol,
+  decodeDecimals,
+  ERC20_SYMBOL_SELECTOR,
+  ERC20_DECIMALS_SELECTOR,
   type StarkscanClient,
+  type AvnuTokenIndex,
 } from "@strk20/core";
 import type { ViewCache, TokenMetaCache } from "../cache/index.js";
 
@@ -12,6 +17,8 @@ export interface TokenTvl {
   address: string;
   symbol: string;
   decimals: number;
+  logoUri: string | null;
+  coingeckoId: string | null;
   balanceRaw: string;
   balanceHuman: number;
   balanceUsd: number;
@@ -19,8 +26,10 @@ export interface TokenTvl {
   withdrawalCount: number;
   /** true if we have a USD price for this token (registry-priced majors). */
   priced: boolean;
-  /** true if symbol/decimals are confirmed (registry or fetched), false if a raw-address fallback. */
+  /** true if symbol/decimals are confirmed, false if a raw-address fallback. */
   identified: boolean;
+  /** where the metadata came from. */
+  source: "avnu" | "cache" | "chain" | "registry" | "unknown";
 }
 
 export interface TvlSummary {
@@ -48,12 +57,14 @@ export async function currentTvl(
   db: Db,
   views: ViewCache,
   tokenMeta: TokenMetaCache,
+  avnu: AvnuTokenIndex,
   chain: string,
   pool: string
 ): Promise<TvlSummary> {
   const cached = views.get<TvlSummary>(TVL_CACHE_KEY);
   if (cached) return cached;
 
+  await avnu.ensureLoaded();
   const tokens = discoverTokens(db, chain, pool);
   const counts = depositWithdrawCountsByToken(db, chain, pool);
 
@@ -62,7 +73,7 @@ export async function currentTvl(
   const perToken: TokenTvl[] = [];
 
   for (const address of tokens) {
-    const meta = await resolveToken(address, client, tokenMeta);
+    const meta = await resolveToken(address, avnu, client, tokenMeta);
 
     let balanceRaw = "0";
     try {
@@ -81,6 +92,8 @@ export async function currentTvl(
       address,
       symbol: meta.symbol,
       decimals: meta.decimals,
+      logoUri: meta.logoUri,
+      coingeckoId: meta.coingeckoId,
       balanceRaw,
       balanceHuman,
       balanceUsd,
@@ -88,6 +101,7 @@ export async function currentTvl(
       withdrawalCount: c.withdrawalCount,
       priced: meta.usdApprox > 0,
       identified: meta.identified,
+      source: meta.source,
     });
   }
 
@@ -116,43 +130,92 @@ export async function currentTvl(
 interface ResolvedToken {
   symbol: string;
   decimals: number;
+  logoUri: string | null;
+  coingeckoId: string | null;
   usdApprox: number;
   identified: boolean;
+  source: TokenTvl["source"];
 }
 
+/**
+ * Resolve token metadata, best source first:
+ *   1. AVNU list  — curated symbol/decimals/logo/coingeckoId (the requested source)
+ *   2. token_meta cache — anything previously resolved on-chain
+ *   3. on-chain symbol()/decimals() read — for tokens AVNU doesn't list (e.g. Vesu vTokens)
+ *   4. raw short address — last resort
+ * USD price comes from the static registry (priced majors) until a coingeckoId
+ * price feed is wired up.
+ */
 async function resolveToken(
   address: string,
+  avnu: AvnuTokenIndex,
   client: StarkscanClient,
   tokenMeta: TokenMetaCache
 ): Promise<ResolvedToken> {
-  // 1) static registry — trusted decimals + USD price
-  const reg = lookupToken(address);
-  if (reg) {
-    return { symbol: reg.symbol, decimals: reg.decimals, usdApprox: reg.usdApprox, identified: true };
+  const price = lookupToken(address)?.usdApprox ?? 0;
+
+  // 1) AVNU curated list
+  const a = avnu.get(address);
+  if (a) {
+    return {
+      symbol: a.symbol,
+      decimals: a.decimals,
+      logoUri: a.logoUri,
+      coingeckoId: a.coingeckoId,
+      usdApprox: price,
+      identified: true,
+      source: "avnu",
+    };
   }
-  // 2) persistent metadata cache
+
+  // 2) persistent on-chain metadata cache
   const cached = tokenMeta.get(address);
-  if (cached?.decimals != null) {
+  if (cached?.decimals != null && cached.symbol) {
     return {
-      symbol: cached.symbol ?? shortAddr(address),
+      symbol: cached.symbol,
       decimals: cached.decimals,
-      usdApprox: 0,
-      identified: cached.symbol != null,
+      logoUri: null,
+      coingeckoId: null,
+      usdApprox: price,
+      identified: true,
+      source: "cache",
     };
   }
-  // 3) fetch once from Starkscan, then cache forever
+
+  // 3) read symbol()/decimals() directly from the token contract
   try {
-    const m = await client.tokenMeta(address);
-    tokenMeta.put(address, { symbol: m.symbol, name: m.name, decimals: m.decimals });
-    return {
-      symbol: m.symbol ?? shortAddr(address),
-      decimals: m.decimals ?? 18,
-      usdApprox: 0,
-      identified: m.symbol != null,
-    };
+    const [symRes, decRes] = await Promise.all([
+      client.contractRead(address, ERC20_SYMBOL_SELECTOR),
+      client.contractRead(address, ERC20_DECIMALS_SELECTOR),
+    ]);
+    const symbol = decodeTokenSymbol(symRes.result);
+    const decimals = decodeDecimals(decRes.result);
+    if (symbol) {
+      tokenMeta.put(address, { symbol, name: symbol, decimals });
+      return {
+        symbol,
+        decimals,
+        logoUri: null,
+        coingeckoId: null,
+        usdApprox: price,
+        identified: true,
+        source: "chain",
+      };
+    }
   } catch {
-    return { symbol: shortAddr(address), decimals: 18, usdApprox: 0, identified: false };
+    // fall through
   }
+
+  // 4) raw address
+  return {
+    symbol: shortAddr(address),
+    decimals: 18,
+    logoUri: null,
+    coingeckoId: null,
+    usdApprox: price,
+    identified: false,
+    source: "unknown",
+  };
 }
 
 /** All distinct token addresses the pool has seen in deposits/withdrawals. */

@@ -15,6 +15,7 @@
 import {
   decodeEvent,
   EVENT_SELECTORS,
+  AvnuTokenIndex,
   type RawContractEvent,
   type StarkscanClient,
 } from "@strk20/core";
@@ -45,6 +46,7 @@ export interface HandlerDeps {
 export function createHandlers(deps: HandlerDeps) {
   const { db, events, views, starkscan, chain, pool } = deps;
   const tokenMeta = new TokenMetaCache(db);
+  const avnu = new AvnuTokenIndex();
 
   return {
     /** Liveness + sync state. */
@@ -107,12 +109,12 @@ export function createHandlers(deps: HandlerDeps) {
 
     /** Live TVL via on-chain token balances. Cached 60s server-side. */
     async tvl() {
-      return currentTvl(starkscan, db, views, tokenMeta, chain, pool);
+      return currentTvl(starkscan, db, views, tokenMeta, avnu, chain, pool);
     },
 
     /** All-in-one headline metrics for the constellation centerpiece. */
     async poolSummary() {
-      const tvl = await currentTvl(starkscan, db, views, tokenMeta, chain, pool);
+      const tvl = await currentTvl(starkscan, db, views, tokenMeta, avnu, chain, pool);
       const depositors = distinctDepositorsAllTime(db, chain, pool);
       const anon = anonymitySet(db, chain, pool);
       return {
