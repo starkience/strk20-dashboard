@@ -19,9 +19,7 @@ export function usePoolOverviewData(): PoolSummary | null {
 }
 
 function fmtUsd(usd: number): string {
-  if (usd >= 1_000_000) return `$${(usd / 1_000_000).toFixed(1)}M`;
-  if (usd >= 1_000) return `$${(usd / 1_000).toFixed(1)}K`;
-  return `$${usd.toFixed(0)}`;
+  return `$${Math.round(usd).toLocaleString("en-US")}`;
 }
 
 /** Pool-level headline numbers, as stacked rows. */
