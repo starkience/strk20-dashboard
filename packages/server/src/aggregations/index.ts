@@ -15,3 +15,4 @@ export * from "./depositors.js";
 export * from "./note-ages.js";
 export * from "./tvl.js";
 export * from "./protocols.js";
+export * from "./window.js";

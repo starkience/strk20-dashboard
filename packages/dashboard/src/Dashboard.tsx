@@ -5,6 +5,7 @@ import { ActiveDepositors } from "./modules/ActiveDepositors.js";
 import { NoteAgeHistogram } from "./modules/NoteAgeHistogram.js";
 import { ShieldedTVL } from "./modules/ShieldedTVL.js";
 import { ActiveApps } from "./modules/ActiveApps.js";
+import { PoolCircle } from "./modules/PoolCircle.js";
 import { useApi } from "./lib/use-api.js";
 
 interface ApiHealth {
@@ -38,7 +39,9 @@ export function Dashboard() {
           <ActiveApps />
         </aside>
 
-        <main data-strk20-right aria-label="reserved" />
+        <main data-strk20-right>
+          <PoolCircle />
+        </main>
       </div>
     </div>
   );

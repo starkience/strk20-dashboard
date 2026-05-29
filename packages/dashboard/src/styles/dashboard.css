@@ -55,7 +55,65 @@
 }
 
 [data-strk20-right] {
-  /* reserved — intentionally blank for now */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+}
+
+[data-strk20-circle-wrap] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+[data-strk20-circle] {
+  aspect-ratio: 1;
+  width: clamp(300px, 62vh, 640px);
+  max-width: 90%;
+  border: 1px solid var(--strk20-text);
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+[data-strk20-circle] .tvl {
+  font-size: clamp(38px, 6.5vh, 68px);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+[data-strk20-circle] .tvl-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--strk20-text-faint);
+  margin-top: 10px;
+}
+[data-strk20-circle] .deltas {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 36px;
+}
+[data-strk20-circle] .delta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+[data-strk20-circle] .delta .dv {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  color: var(--strk20-text);
+}
+[data-strk20-circle] .delta .dl {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--strk20-text-faint);
 }
 
 /* ─── Horizontal rows ─── */

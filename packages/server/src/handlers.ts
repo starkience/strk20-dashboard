@@ -31,6 +31,7 @@ import {
 import { noteAgeBuckets } from "./aggregations/note-ages.js";
 import { currentTvl } from "./aggregations/tvl.js";
 import { activeProtocols, topCallers } from "./aggregations/protocols.js";
+import { windowStats } from "./aggregations/window.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -117,6 +118,7 @@ export function createHandlers(deps: HandlerDeps) {
       const tvl = await currentTvl(starkscan, db, views, tokenMeta, avnu, chain, pool);
       const depositors = distinctDepositorsAllTime(db, chain, pool);
       const anon = anonymitySet(db, chain, pool);
+      const w = windowStats(db, chain, pool, Date.now() - DAY_MS);
       return {
         tvlUsd: tvl.totalUsd,
         depositCount: tvl.depositCount,
@@ -125,6 +127,9 @@ export function createHandlers(deps: HandlerDeps) {
         anonymitySetUnspent: anon.unspent,
         partial: tvl.partial,
         perToken: tvl.perToken,
+        deposits24h: w.deposits,
+        withdrawals24h: w.withdrawals,
+        tvlChangeUsd24h: w.tvlChangeUsd,
       };
     },
 

@@ -8,6 +8,9 @@ export interface PoolSummary {
   userCount: number;
   anonymitySetUnspent: number;
   partial: boolean;
+  deposits24h: number;
+  withdrawals24h: number;
+  tvlChangeUsd24h: number;
 }
 
 export interface PoolOverviewProps {

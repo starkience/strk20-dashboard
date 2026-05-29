@@ -13,6 +13,8 @@ export {
   type PoolSummary,
 } from "./modules/PoolOverview.js";
 
+export { PoolCircle, type PoolCircleProps } from "./modules/PoolCircle.js";
+
 export {
   ActiveApps,
   useActiveAppsData,
