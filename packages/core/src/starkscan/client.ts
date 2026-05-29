@@ -160,6 +160,16 @@ export class StarkscanClient {
     } while (cursor);
   }
 
+  async tokenMeta(tokenAddress: string): Promise<{
+    tokenAddress: string;
+    symbol: string | null;
+    name: string | null;
+    decimals: number | null;
+    standard: string | null;
+  }> {
+    return this.get(`/v1/${this.chain}/token/${tokenAddress}`);
+  }
+
   async tokenBalanceOf(
     tokenAddress: string,
     ownerAddress: string,

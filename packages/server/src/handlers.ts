@@ -18,7 +18,7 @@ import {
   type RawContractEvent,
   type StarkscanClient,
 } from "@strk20/core";
-import type { EventCache, ViewCache } from "./cache/index.js";
+import { TokenMetaCache, type EventCache, type ViewCache } from "./cache/index.js";
 import type { Db } from "./cache/db.js";
 import { syncContractEvents } from "./sync.js";
 import { anonymitySet } from "./aggregations/anonymity-set.js";
@@ -44,6 +44,7 @@ export interface HandlerDeps {
 
 export function createHandlers(deps: HandlerDeps) {
   const { db, events, views, starkscan, chain, pool } = deps;
+  const tokenMeta = new TokenMetaCache(db);
 
   return {
     /** Liveness + sync state. */
@@ -106,12 +107,12 @@ export function createHandlers(deps: HandlerDeps) {
 
     /** Live TVL via on-chain token balances. Cached 60s server-side. */
     async tvl() {
-      return currentTvl(starkscan, db, views, chain, pool);
+      return currentTvl(starkscan, db, views, tokenMeta, chain, pool);
     },
 
     /** All-in-one headline metrics for the constellation centerpiece. */
     async poolSummary() {
-      const tvl = await currentTvl(starkscan, db, views, chain, pool);
+      const tvl = await currentTvl(starkscan, db, views, tokenMeta, chain, pool);
       const depositors = distinctDepositorsAllTime(db, chain, pool);
       const anon = anonymitySet(db, chain, pool);
       return {

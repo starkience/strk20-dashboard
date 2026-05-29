@@ -16,6 +16,7 @@ export interface ShieldedTVLData {
   totalUsd: number;
   depositCount: number;
   withdrawalCount: number;
+  tokenCount: number;
   perToken: ShieldedTVLToken[];
   partial: boolean;
 }
@@ -41,7 +42,9 @@ export function ShieldedTVL({ data: dataProp }: ShieldedTVLProps = {}) {
   const data = dataProp ?? fetched;
   return (
     <div data-strk20-group>
-      <div data-strk20-group-label>Shielded TVL · by asset</div>
+      <div data-strk20-group-label>
+        Shielded TVL · by asset{data ? ` · ${data.tokenCount} tokens` : ""}
+      </div>
       {!data && <Row label="loading…" value="—" />}
       {data?.perToken.map((t) => (
         <Row

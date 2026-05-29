@@ -43,6 +43,14 @@ CREATE TABLE IF NOT EXISTS sync_state (
   PRIMARY KEY (chain, contract)
 );
 
+CREATE TABLE IF NOT EXISTS token_meta (
+  address     TEXT PRIMARY KEY,
+  symbol      TEXT,
+  name        TEXT,
+  decimals    INTEGER,
+  fetched_at  INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS view_cache (
   key         TEXT PRIMARY KEY,
   value_json  TEXT NOT NULL,
