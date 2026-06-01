@@ -55,6 +55,16 @@ app.get("/agg/note-ages", async (c) => c.json(await h.noteAges()));
 app.get("/agg/tvl", async (c) => c.json(await h.tvl()));
 app.get("/agg/pool-summary", async (c) => c.json(await h.poolSummary()));
 app.get("/agg/active-protocols", async (c) => c.json(await h.activeProtocols()));
+app.get("/agg/lifetime-volume", async (c) => c.json(await h.lifetimeVolume()));
+app.get("/agg/relayer-concentration", async (c) => c.json(await h.relayerConcentration()));
+app.get("/agg/flows-graph", async (c) => {
+  const window = (c.req.query("window") ?? "7d") as "1h" | "24h" | "7d";
+  try {
+    return c.json(await h.flowsGraph({ window }));
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 400);
+  }
+});
 app.get("/agg/top-callers", async (c) => {
   const limit = Number(c.req.query("limit") ?? 25);
   return c.json(await h.topCallers({ limit }));

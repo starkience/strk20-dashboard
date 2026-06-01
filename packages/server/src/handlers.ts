@@ -32,6 +32,13 @@ import { noteAgeBuckets } from "./aggregations/note-ages.js";
 import { currentTvl } from "./aggregations/tvl.js";
 import { activeProtocols, topCallers } from "./aggregations/protocols.js";
 import { windowStats } from "./aggregations/window.js";
+import { lifetimeVolume } from "./aggregations/lifetime-volume.js";
+import {
+  flowsGraph,
+  FLOWS_GRAPH_WINDOWS_MS,
+  type FlowsGraphWindow,
+} from "./aggregations/flows-graph.js";
+import { relayerConcentration } from "./aggregations/relayer-concentration.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -131,6 +138,62 @@ export function createHandlers(deps: HandlerDeps) {
         withdrawals24h: w.withdrawals,
         tvlChangeUsd24h: w.tvlChangeUsd,
       };
+    },
+
+    /**
+     * Per-token flows in a window + center aggregate stats. Drives the
+     * L2Beat-adapted hero chart. Window is whitelisted to {1h, 24h, 7d}.
+     * Cached 30s per window.
+     */
+    async flowsGraph(opts: { window?: FlowsGraphWindow } = {}) {
+      const win = opts.window ?? "7d";
+      if (!(win in FLOWS_GRAPH_WINDOWS_MS)) {
+        throw new Error(`window must be one of: ${Object.keys(FLOWS_GRAPH_WINDOWS_MS).join(", ")}`);
+      }
+      const windowMs = FLOWS_GRAPH_WINDOWS_MS[win];
+      const key = `flows-graph:${chain}:${pool}:${win}`;
+      const cached = views.get<unknown>(key);
+      if (cached) return cached;
+      const result = await flowsGraph(db, chain, pool, windowMs, {
+        currentTvl: async () => {
+          const t = await currentTvl(starkscan, db, views, tokenMeta, avnu, chain, pool);
+          return {
+            totalUsd: t.totalUsd,
+            perToken: t.perToken.map((p) => ({
+              address: p.address,
+              symbol: p.symbol,
+              decimals: p.decimals,
+              balanceUsd: p.balanceUsd,
+              priced: p.priced,
+            })),
+          };
+        },
+        anonymitySetUnspent: () => anonymitySet(db, chain, pool).unspent,
+      });
+      views.put(key, result, 30_000);
+      return result;
+    },
+
+    /**
+     * Withdrawal-broadcaster concentration (HHI + top share). Surfaces the
+     * paymaster-centralization dimension of the pool's privacy architecture.
+     * Cheap; not cached.
+     */
+    async relayerConcentration() {
+      return relayerConcentration(db, chain, pool);
+    },
+
+    /**
+     * All-time USD volume processed (deposits + withdrawals). Priced via the
+     * static token registry. Cached 60s — the scan walks every cached event.
+     */
+    async lifetimeVolume() {
+      const key = `lifetime-volume:${chain}:${pool}`;
+      const cached = views.get<unknown>(key);
+      if (cached) return cached;
+      const result = lifetimeVolume(db, chain, pool);
+      views.put(key, result, 60_000);
+      return result;
     },
 
     /** Per-protocol routed activity (AVNU, Vesu, Endur, Ekubo, Troves). */

@@ -1,10 +1,26 @@
 /**
  * Active protocols routing through the STRK20 pool.
  *
- * The address values below are SEED ENTRIES — they need curation against the
- * real addresses these protocols use as deposit/withdrawal callers on the pool.
- * Use the `/agg/top-callers` discovery endpoint to identify which addresses are
- * actually showing up in `Deposit` / `Withdrawal` events, then map them here.
+ * Curation status (2026-06-01):
+ *
+ *   AVNU   — CONFIRMED INTEGRATED. The Forwarder address below accounts for
+ *            ~88% of all withdrawal events on the pool today: it's the
+ *            paymaster that broadcasts users' withdrawals so recipient
+ *            addresses don't need pre-funding (a fundamental privacy property
+ *            of the pool — pre-funding would be a deanonymization signal).
+ *            All 3 published addresses are registered for completeness.
+ *
+ *   Ekubo  — Router + Core registered. AMM; users may route swaps through
+ *            Ekubo before depositing, but Ekubo contracts don't directly
+ *            call deposit/withdraw on the pool. Likely to stay near-zero
+ *            unless an Ekubo-mediated direct flow ships.
+ *
+ *   Vesu, Endur, Troves — TOKEN-GRAPH integrations: their tokens appear in
+ *            the pool's TVL (Endur LSTs, Vesu vault tokens, Troves vault
+ *            strategies) but their contracts don't directly call the pool.
+ *            Left with empty addresses and `needsCuration: true` until/unless
+ *            a router-mediated flow ships. Their relationship to the pool
+ *            is asset-level, not call-level.
  *
  * Each protocol can have multiple addresses (router + paymaster + vault, etc).
  * The classifier matches against any of them.
@@ -17,43 +33,69 @@ export interface ProtocolDefinition {
   label: string;
   /** Addresses associated with the protocol. All lowercase, 0x-prefixed. */
   addresses: string[];
-  /** TODO: replace with confirmed addresses when curated. */
+  /** True if no on-chain addresses are registered yet for attribution. */
   needsCuration: boolean;
+  /**
+   * How the protocol relates to the pool. Lets the UI distinguish a
+   * paymaster/router (calls the pool) from a token issuer or AMM whose
+   * tokens flow through the pool via users.
+   */
+  integrationType:
+    | "paymaster"
+    | "router"
+    | "amm"
+    | "token-issuer"
+    | "vault"
+    | "pending";
 }
 
 export const PROTOCOLS: ProtocolDefinition[] = [
   {
     id: "avnu",
     label: "AVNU",
-    // TODO curate — AVNU has a router + paymaster set; verify against /agg/top-callers
-    addresses: [],
-    needsCuration: true,
+    addresses: [
+      // Forwarder (paymaster) — broadcasts ~88% of withdrawals so recipients don't pay gas
+      "0x0127021a1b5a52d3174c2ab077c2b043c80369250d29428cee956d76ee51584f",
+      // Exchange router
+      "0x04270219d365d6b017231b52e92b3fb5d7c8378b05e9abc97724537a80e93b0f",
+      // DCA orchestrator
+      "0x0492139c56af6faf77119b6bca3b6d40f559af6b7b23778f068dd9ca08e407c5",
+    ],
+    needsCuration: false,
+    integrationType: "paymaster",
+  },
+  {
+    id: "ekubo",
+    label: "Ekubo",
+    addresses: [
+      // Ekubo Core
+      "0x00000005dd3d2f4429af886cd1a3b08289dbcea99a294197e9eb43b0e0325b4b",
+      // Router V3.0.13
+      "0x0199741822c2dc722f6f605204f35e56dbc23bceed54818168c4c49e4fb8737e",
+    ],
+    needsCuration: false,
+    integrationType: "amm",
   },
   {
     id: "vesu",
     label: "Vesu",
-    // TODO curate — Vesu has multiple pool addresses
     addresses: [],
     needsCuration: true,
+    integrationType: "pending",
   },
   {
     id: "endur",
     label: "Endur",
     addresses: [],
     needsCuration: true,
-  },
-  {
-    id: "ekubo",
-    label: "Ekubo",
-    // TODO curate — Ekubo Core + extensions; the address commonly cited is below but verify
-    addresses: [],
-    needsCuration: true,
+    integrationType: "token-issuer",
   },
   {
     id: "troves",
     label: "Troves",
     addresses: [],
     needsCuration: true,
+    integrationType: "vault",
   },
 ];
 

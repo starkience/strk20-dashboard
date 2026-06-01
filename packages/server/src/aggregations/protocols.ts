@@ -4,6 +4,7 @@ import {
   PROTOCOLS,
   protocolForAddress,
   normalizeAddress,
+  type ProtocolDefinition,
 } from "@strk20/core";
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -17,6 +18,7 @@ export interface ProtocolActivity {
   lastSeenIso: string | null;
   recentlyActive: boolean;
   needsCuration: boolean;
+  integrationType: ProtocolDefinition["integrationType"];
 }
 
 /**
@@ -43,6 +45,7 @@ export function activeProtocols(
         lastSeenIso: null,
         recentlyActive: false,
         needsCuration: p.needsCuration,
+        integrationType: p.integrationType,
       };
     }
     const placeholders = p.addresses.map(() => "?").join(",");
@@ -81,6 +84,7 @@ export function activeProtocols(
       lastSeenIso: lastIso,
       recentlyActive,
       needsCuration: p.needsCuration,
+      integrationType: p.integrationType,
     };
   });
 }
