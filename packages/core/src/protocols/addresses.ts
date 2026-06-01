@@ -56,13 +56,21 @@ export const PROTOCOLS: ProtocolDefinition[] = [
     addresses: [
       // Forwarder (paymaster) — broadcasts ~88% of withdrawals so recipients don't pay gas
       "0x0127021a1b5a52d3174c2ab077c2b043c80369250d29428cee956d76ee51584f",
-      // Exchange router
-      "0x04270219d365d6b017231b52e92b3fb5d7c8378b05e9abc97724537a80e93b0f",
-      // DCA orchestrator
-      "0x0492139c56af6faf77119b6bca3b6d40f559af6b7b23778f068dd9ca08e407c5",
     ],
     needsCuration: false,
     integrationType: "paymaster",
+  },
+  {
+    id: "avnu-dex",
+    label: "AVNU DEX",
+    addresses: [
+      // Exchange router (swap aggregator)
+      "0x04270219d365d6b017231b52e92b3fb5d7c8378b05e9abc97724537a80e93b0f",
+      // DCA orchestrator (time-based orders)
+      "0x0492139c56af6faf77119b6bca3b6d40f559af6b7b23778f068dd9ca08e407c5",
+    ],
+    needsCuration: false,
+    integrationType: "router",
   },
   {
     id: "ekubo",
