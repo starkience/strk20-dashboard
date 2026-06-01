@@ -20,6 +20,7 @@ import {
   type StarkscanClient,
 } from "@strk20/core";
 import { TokenMetaCache, type EventCache, type ViewCache } from "./cache/index.js";
+import type { HeartbeatCache } from "./cache/heartbeats.js";
 import type { Db } from "./cache/db.js";
 import { syncContractEvents } from "./sync.js";
 import { anonymitySet } from "./aggregations/anonymity-set.js";
@@ -40,6 +41,7 @@ import {
 } from "./aggregations/flows-graph.js";
 import { relayerConcentration } from "./aggregations/relayer-concentration.js";
 import { recentTransactions } from "./aggregations/recent-transactions.js";
+import { uptimeHistory } from "./aggregations/uptime.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -47,13 +49,14 @@ export interface HandlerDeps {
   db: Db;
   events: EventCache;
   views: ViewCache;
+  heartbeats: HeartbeatCache;
   starkscan: StarkscanClient;
   chain: string;
   pool: string;
 }
 
 export function createHandlers(deps: HandlerDeps) {
-  const { db, events, views, starkscan, chain, pool } = deps;
+  const { db, events, views, heartbeats, starkscan, chain, pool } = deps;
   const tokenMeta = new TokenMetaCache(db);
   const avnu = new AvnuTokenIndex();
 
@@ -97,6 +100,27 @@ export function createHandlers(deps: HandlerDeps) {
     async privateOps(opts: { windowMs?: number } = {}) {
       const window = opts.windowMs ?? DAY_MS;
       return privateOpsSince(db, chain, pool, Date.now() - window);
+    },
+
+    /**
+     * Windowed deposit + withdrawal counts (drawn from windowStats — the
+     * same source the 24h figures on pool-summary use). Activities panel on
+     * the dashboard fans this out as the live portion of "Most frequent
+     * activities" for a 30D window. Cached 30s per window.
+     */
+    async windowOps(opts: { windowMs?: number } = {}) {
+      const window = opts.windowMs ?? DAY_MS;
+      const key = `window-ops:${chain}:${pool}:${window}`;
+      const cached = views.get<unknown>(key);
+      if (cached) return cached;
+      const w = windowStats(db, chain, pool, Date.now() - window);
+      const result = {
+        windowMs: window,
+        deposits: w.deposits,
+        withdrawals: w.withdrawals,
+      };
+      views.put(key, result, 30_000);
+      return result;
     },
 
     /** Active depositor count in window (default 24h). Addresses omitted by default. */
@@ -182,6 +206,25 @@ export function createHandlers(deps: HandlerDeps) {
      */
     async relayerConcentration() {
       return relayerConcentration(db, chain, pool);
+    },
+
+    /**
+     * Indexer uptime history derived from sync heartbeats. Returns one entry
+     * per UTC day (oldest → newest) with ok/degraded/incident/unknown plus
+     * the heartbeat-weighted aggregate percentage. Cached 60s.
+     *
+     * Once Uptime Kuma is deployed and pointed at /health, swap the body to
+     * fetch Kuma's status-page heartbeats instead — same UptimeHistory shape,
+     * frontend doesn't change.
+     */
+    async uptimeHistory(opts: { days?: number } = {}) {
+      const days = Math.max(1, Math.min(365, opts.days ?? 90));
+      const key = `uptime-history:${days}`;
+      const cached = views.get<unknown>(key);
+      if (cached) return cached;
+      const result = uptimeHistory(heartbeats, days);
+      views.put(key, result, 60_000);
+      return result;
     },
 
     /**
