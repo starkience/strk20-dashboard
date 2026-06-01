@@ -57,6 +57,10 @@ app.get("/agg/pool-summary", async (c) => c.json(await h.poolSummary()));
 app.get("/agg/active-protocols", async (c) => c.json(await h.activeProtocols()));
 app.get("/agg/lifetime-volume", async (c) => c.json(await h.lifetimeVolume()));
 app.get("/agg/relayer-concentration", async (c) => c.json(await h.relayerConcentration()));
+app.get("/agg/recent-transactions", async (c) => {
+  const limit = Number(c.req.query("limit") ?? 20);
+  return c.json(await h.recentTransactions({ limit }));
+});
 app.get("/agg/flows-graph", async (c) => {
   const window = (c.req.query("window") ?? "7d") as "1h" | "24h" | "7d";
   try {

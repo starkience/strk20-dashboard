@@ -39,6 +39,7 @@ import {
   type FlowsGraphWindow,
 } from "./aggregations/flows-graph.js";
 import { relayerConcentration } from "./aggregations/relayer-concentration.js";
+import { recentTransactions } from "./aggregations/recent-transactions.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -181,6 +182,22 @@ export function createHandlers(deps: HandlerDeps) {
      */
     async relayerConcentration() {
       return relayerConcentration(db, chain, pool);
+    },
+
+    /**
+     * Latest Deposit + Withdrawal events from the cache. Privacy-curated:
+     * depositor address and encrypted recipient blob are NOT emitted; the
+     * client renders those as "[private]". Cached 5s — fresh enough to feel
+     * live without pummeling the cache on every poll.
+     */
+    async recentTransactions(opts: { limit?: number } = {}) {
+      const limit = Math.max(1, Math.min(100, opts.limit ?? 20));
+      const key = `recent-tx:${chain}:${pool}:${limit}`;
+      const cached = views.get<unknown>(key);
+      if (cached) return cached;
+      const result = { transactions: recentTransactions(db, chain, pool, limit) };
+      views.put(key, result, 5_000);
+      return result;
     },
 
     /**
