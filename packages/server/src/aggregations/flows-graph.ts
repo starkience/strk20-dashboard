@@ -1,10 +1,13 @@
 import type { Db } from "../cache/db.js";
 import {
   EVENT_SELECTORS,
+  PROTOCOLS,
   lookupToken,
   applyDecimals,
   normalizeHex,
   protocolForAddress,
+  normalizeAddress,
+  type ProtocolDefinition,
 } from "@strk20/core";
 
 /**
@@ -57,6 +60,24 @@ export interface FlowsGraphTokenEntry {
   priced: boolean;
 }
 
+export interface FlowsGraphProtocolEntry {
+  id: string;
+  label: string;
+  integrationType: ProtocolDefinition["integrationType"];
+  /** Window count of Deposit events whose user_addr matches a registered protocol address. */
+  depositCount: number;
+  /** Window count of Withdrawal events whose to_addr matches. */
+  withdrawalCount: number;
+  /** Window USD value of those deposits. */
+  depositsUsd: number;
+  /** Window USD value of those withdrawals. */
+  withdrawalsUsd: number;
+  /** True if either side falls below the privacy floor for animation. */
+  belowPrivacyFloor: boolean;
+  /** True if the protocol has no registered addresses yet. */
+  needsCuration: boolean;
+}
+
 export interface FlowsGraphResponse {
   windowMs: number;
   asOf: string;
@@ -74,6 +95,9 @@ export interface FlowsGraphResponse {
      */
     relayerShareWindow: number;
   };
+  /** Outer ring of the hero chart — bubbles per ecosystem protocol. */
+  protocols: FlowsGraphProtocolEntry[];
+  /** Supporting per-token detail (used by tables, not the chart ring). */
   tokens: FlowsGraphTokenEntry[];
   /** True if any priced token couldn't be USD-valued (registry gap). */
   partial: boolean;
@@ -234,6 +258,8 @@ export async function flowsGraph(
     return b.tvlUsd - a.tvlUsd;
   });
 
+  const protocols = computeProtocolFlows(db, chain, pool, sinceIso);
+
   return {
     windowMs,
     asOf: new Date(now).toISOString(),
@@ -246,7 +272,106 @@ export async function flowsGraph(
       withdrawalCount: centerWithdrawalCount,
       relayerShareWindow: relayerShareInWindow(db, chain, pool, sinceIso),
     },
+    protocols,
     tokens,
     partial,
   };
+}
+
+/**
+ * Per-protocol windowed deposit/withdrawal counts + USD volumes. Drives the
+ * apps ring of the hero chart.
+ *
+ *   Deposits   → topic1 is user_addr (caller)
+ *   Withdrawals → topic1 is to_addr (destination)
+ *
+ * Each protocol contributes the events whose topic1 hits one of its
+ * registered addresses. Protocols with no registered addresses contribute
+ * zero (needsCuration flag preserved so the UI can render an "integration
+ * pending" badge instead of a stream).
+ */
+function computeProtocolFlows(
+  db: Db,
+  chain: string,
+  pool: string,
+  sinceIso: string
+): FlowsGraphProtocolEntry[] {
+  return PROTOCOLS.map((p) => {
+    if (p.addresses.length === 0) {
+      return {
+        id: p.id,
+        label: p.label,
+        integrationType: p.integrationType,
+        depositCount: 0,
+        withdrawalCount: 0,
+        depositsUsd: 0,
+        withdrawalsUsd: 0,
+        belowPrivacyFloor: true,
+        needsCuration: true,
+      };
+    }
+    const addrs = p.addresses.map(normalizeAddress);
+    const dep = sumFlowForCallers(
+      db,
+      chain,
+      pool,
+      EVENT_SELECTORS.Deposit,
+      0,
+      sinceIso,
+      addrs
+    );
+    const wd = sumFlowForCallers(
+      db,
+      chain,
+      pool,
+      EVENT_SELECTORS.Withdrawal,
+      3,
+      sinceIso,
+      addrs
+    );
+    return {
+      id: p.id,
+      label: p.label,
+      integrationType: p.integrationType,
+      depositCount: dep.count,
+      withdrawalCount: wd.count,
+      depositsUsd: dep.usd,
+      withdrawalsUsd: wd.usd,
+      belowPrivacyFloor:
+        dep.count < MIN_OPS_PER_FLOW && wd.count < MIN_OPS_PER_FLOW,
+      needsCuration: false,
+    };
+  });
+}
+
+function sumFlowForCallers(
+  db: Db,
+  chain: string,
+  pool: string,
+  topic0: string,
+  amountIndex: number,
+  sinceIso: string,
+  callerAddrs: string[]
+): { usd: number; count: number } {
+  if (callerAddrs.length === 0) return { usd: 0, count: 0 };
+  const placeholders = callerAddrs.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      `SELECT topic2 as token, data_json FROM raw_events
+       WHERE chain=? AND contract=? AND topic0=? AND timestamp_iso >= ?
+         AND topic1 IN (${placeholders})`
+    )
+    .all(chain, pool, topic0, sinceIso, ...callerAddrs) as {
+    token: string;
+    data_json: string;
+  }[];
+  let usd = 0;
+  for (const r of rows) {
+    const meta = lookupToken(normalizeHex(r.token ?? "0x0"));
+    if (!meta || meta.usdApprox === 0) continue;
+    const data = JSON.parse(r.data_json) as string[];
+    const raw = BigInt(data[amountIndex] ?? "0x0");
+    usd += applyDecimals(raw, meta.decimals) * meta.usdApprox;
+  }
+  return { usd, count: rows.length };
 }
