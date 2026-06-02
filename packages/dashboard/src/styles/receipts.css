@@ -1,0 +1,343 @@
+/* STRK20 receipts — Shinobi palette. Dark deep-violet ground, ember-orange accents. */
+
+:root {
+  --rx-bg: #0c0a18;
+  --rx-bg-2: #15102a;
+  --rx-line: rgba(255, 122, 26, 0.18);
+  --rx-line-strong: rgba(255, 122, 26, 0.45);
+  --rx-text: #f4efe4;
+  --rx-text-mute: #b6aac0;
+  --rx-text-faint: #6a607b;
+  --rx-ember: #ff7a1a;
+  --rx-ember-soft: #ffb070;
+  --rx-violet: #5b3df0;
+  --rx-deposit: #5cd0a8;
+  --rx-withdraw: #ff7a1a;
+  --rx-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --rx-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+[data-strk20="receipts"] {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  color: var(--rx-text);
+  background: var(--rx-bg);
+  font-family: var(--rx-sans);
+}
+
+/* ─── Header ─── */
+
+[data-strk20="receipts-header"] {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--rx-line);
+  background: linear-gradient(180deg, rgba(255, 122, 26, 0.04), transparent);
+  flex: 0 0 auto;
+}
+[data-strk20="receipts-header"] .title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+[data-strk20="receipts-header"] h1 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rx-text);
+}
+[data-strk20="receipts-header"] .sub {
+  font-size: 11px;
+  color: var(--rx-text-faint);
+  letter-spacing: 0.02em;
+}
+[data-strk20="receipts-header"] .status {
+  font-family: var(--rx-mono);
+  font-size: 11px;
+  color: var(--rx-text-mute);
+  padding: 4px 10px;
+  border: 1px solid var(--rx-line);
+  border-radius: 999px;
+}
+
+/* ─── 3D scene container ─── */
+
+[data-strk20-scene-wrap] {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+[data-strk20-scene] {
+  position: absolute;
+  inset: 0;
+}
+
+/* Soft radial vignette so the grid edges fade into the deep-violet ground. */
+.scene-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 80% at 50% 55%, transparent 55%, rgba(12, 10, 24, 0.95) 100%),
+    radial-gradient(40% 30% at 12% 8%, rgba(255, 122, 26, 0.1), transparent 70%);
+}
+
+/* "Printer" indicator floating above the spawn slot (row 0, col 0).
+ * The grid is centred and 6*240 + 5*24 = 1560px wide; col 0's centre sits at
+ * (viewport/2) - (grid/2) + (card/2) = (viewport/2) - 660px. We nudge the
+ * label just to the left of the card so the dot sits over its top edge.
+ * On narrow viewports we clamp so it stays on-screen. */
+.scene-printer {
+  position: absolute;
+  top: 14px;
+  left: max(16px, calc(50% - 780px));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.scene-printer::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--rx-ember);
+  box-shadow: 0 0 12px var(--rx-ember), 0 0 24px rgba(255, 122, 26, 0.5);
+  animation: printer-pulse 1.6s ease-in-out infinite;
+}
+.scene-printer .printer-label {
+  font-family: var(--rx-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--rx-ember-soft);
+  text-transform: uppercase;
+}
+@keyframes printer-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.85); }
+  50%      { opacity: 1;   transform: scale(1.15); }
+}
+
+/* ─── Receipt card (also rendered inside CSS3D) ─── */
+
+.strk20-receipt {
+  background: linear-gradient(180deg, #fbf6e9 0%, #f4ecd6 100%);
+  color: #2a1d0a;
+  padding: 12px 14px 8px;
+  font-family: var(--rx-mono);
+  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  position: relative;
+  border-radius: 2px;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.6) inset,
+    0 0 0 1px rgba(0, 0, 0, 0.08),
+    0 12px 24px -8px rgba(0, 0, 0, 0.55),
+    0 0 30px rgba(255, 122, 26, 0.08);
+  transition: box-shadow 0.2s ease;
+  will-change: transform, opacity;
+}
+.strk20-receipt::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.02) 0,
+    rgba(0, 0, 0, 0.02) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  opacity: 0.6;
+  mix-blend-mode: multiply;
+}
+
+.receipt-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6b5837;
+}
+.receipt-head .kind {
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 2px;
+}
+.receipt-head .kind-deposit {
+  color: #0e6b4a;
+  background: rgba(92, 208, 168, 0.18);
+}
+.receipt-head .kind-withdrawal {
+  color: #a14400;
+  background: rgba(255, 122, 26, 0.18);
+}
+
+.receipt-amt {
+  font-family: var(--rx-mono);
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: #1a1208;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.receipt-amt .sym {
+  font-size: 11px;
+  color: #6b5837;
+  letter-spacing: 0.06em;
+}
+
+.receipt-foot {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+  font-size: 9.5px;
+  color: #6b5837;
+  align-items: center;
+}
+.receipt-foot .hash { color: #1a1208; }
+.receipt-foot .usd  { font-weight: 500; color: #1a1208; }
+
+/* Tear edge along the bottom of every receipt for that printer-roll feel. */
+.receipt-tear {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -6px;
+  height: 6px;
+  background-image:
+    radial-gradient(circle at 4px 0, #0c0a18 3px, transparent 3.2px);
+  background-size: 8px 6px;
+  background-repeat: repeat-x;
+  pointer-events: none;
+}
+
+/* ─── Footer ─── */
+
+[data-strk20-footer] {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  align-items: center;
+  padding: 14px 24px;
+  border-top: 1px solid var(--rx-line);
+  background: rgba(12, 10, 24, 0.85);
+  backdrop-filter: blur(6px);
+  flex: 0 0 auto;
+  font-family: var(--rx-mono);
+  font-size: 11px;
+  color: var(--rx-text-mute);
+}
+[data-strk20-footer] .indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+[data-strk20-footer] .indicator .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--rx-text-faint);
+}
+[data-strk20-footer] .indicator .dot.active {
+  background: var(--rx-ember);
+  box-shadow: 0 0 10px var(--rx-ember);
+  animation: printer-pulse 1.1s ease-in-out infinite;
+}
+[data-strk20-footer] .totals {
+  justify-self: center;
+  color: var(--rx-text-faint);
+}
+[data-strk20-footer] .view-all {
+  justify-self: end;
+  background: transparent;
+  border: 1px solid var(--rx-line-strong);
+  color: var(--rx-ember-soft);
+  font-family: var(--rx-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 8px 14px;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+[data-strk20-footer] .view-all:hover {
+  background: rgba(255, 122, 26, 0.1);
+  color: var(--rx-ember);
+}
+
+/* ─── History view ─── */
+
+[data-strk20-history] {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--rx-bg);
+}
+.history-bar {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--rx-line);
+  font-family: var(--rx-mono);
+  font-size: 11px;
+  color: var(--rx-text-mute);
+}
+.history-bar .back,
+.history-bar .pager button {
+  background: transparent;
+  border: 1px solid var(--rx-line-strong);
+  color: var(--rx-ember-soft);
+  font-family: var(--rx-mono);
+  font-size: 11px;
+  padding: 6px 10px;
+  cursor: pointer;
+  border-radius: 2px;
+  letter-spacing: 0.05em;
+}
+.history-bar .back:hover,
+.history-bar .pager button:not(:disabled):hover {
+  background: rgba(255, 122, 26, 0.1);
+}
+.history-bar .pager {
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.history-bar .pager button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.history-bar .count {
+  justify-self: start;
+  color: var(--rx-text-faint);
+}
+
+.history-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 20px;
+  align-content: start;
+}
+.history-card { height: 120px; }

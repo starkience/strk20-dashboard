@@ -25,4 +25,9 @@ export default defineConfig({
     },
     sourcemap: true,
   },
+  // dev server + `vite preview` only — picks up index.html and receipts.html
+  // (the library `build` above is the published-package output and ignores both).
+  server: {
+    open: "/index.html",
+  },
 });

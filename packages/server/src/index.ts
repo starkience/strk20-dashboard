@@ -62,6 +62,7 @@ app.get("/agg/tvl", async (c) => c.json(await h.tvl()));
 app.get("/agg/pool-summary", async (c) => c.json(await h.poolSummary()));
 app.get("/agg/active-protocols", async (c) => c.json(await h.activeProtocols()));
 app.get("/agg/lifetime-volume", async (c) => c.json(await h.lifetimeVolume()));
+app.get("/agg/lifetime-revenue", async (c) => c.json(await h.lifetimeRevenue()));
 app.get("/agg/relayer-concentration", async (c) => c.json(await h.relayerConcentration()));
 app.get("/agg/uptime-history", async (c) => {
   const days = Number(c.req.query("days") ?? 90);

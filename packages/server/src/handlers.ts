@@ -34,6 +34,7 @@ import { currentTvl } from "./aggregations/tvl.js";
 import { activeProtocols, topCallers } from "./aggregations/protocols.js";
 import { windowStats } from "./aggregations/window.js";
 import { lifetimeVolume } from "./aggregations/lifetime-volume.js";
+import { lifetimeRevenue } from "./aggregations/lifetime-revenue.js";
 import {
   flowsGraph,
   FLOWS_GRAPH_WINDOWS_MS,
@@ -247,6 +248,20 @@ export function createHandlers(deps: HandlerDeps) {
      * All-time USD volume processed (deposits + withdrawals). Priced via the
      * static token registry. Cached 60s — the scan walks every cached event.
      */
+    /**
+     * Lifetime protocol revenue. fee_per_apply_actions × number of
+     * apply_actions calls (≈ distinct tx hashes in our event cache),
+     * priced in STRK then USD via the static token registry. Cached 60s
+     * because it walks every cached event for the distinct-tx count. */
+    async lifetimeRevenue() {
+      const key = `lifetime-revenue:${chain}:${pool}`;
+      const cached = views.get<unknown>(key);
+      if (cached) return cached;
+      const result = lifetimeRevenue(db, chain, pool);
+      views.put(key, result, 60_000);
+      return result;
+    },
+
     async lifetimeVolume() {
       const key = `lifetime-volume:${chain}:${pool}`;
       const cached = views.get<unknown>(key);
