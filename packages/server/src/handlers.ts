@@ -20,6 +20,7 @@ import {
   type StarkscanClient,
 } from "@strk20/core";
 import { TokenMetaCache, type EventCache, type ViewCache } from "./cache/index.js";
+import type { HeartbeatCache } from "./cache/heartbeats.js";
 import type { Db } from "./cache/db.js";
 import { syncContractEvents } from "./sync.js";
 import { anonymitySet } from "./aggregations/anonymity-set.js";
@@ -32,6 +33,16 @@ import { noteAgeBuckets } from "./aggregations/note-ages.js";
 import { currentTvl } from "./aggregations/tvl.js";
 import { activeProtocols, topCallers } from "./aggregations/protocols.js";
 import { windowStats } from "./aggregations/window.js";
+import { lifetimeVolume } from "./aggregations/lifetime-volume.js";
+import { lifetimeRevenue } from "./aggregations/lifetime-revenue.js";
+import {
+  flowsGraph,
+  FLOWS_GRAPH_WINDOWS_MS,
+  type FlowsGraphWindow,
+} from "./aggregations/flows-graph.js";
+import { relayerConcentration } from "./aggregations/relayer-concentration.js";
+import { recentTransactions } from "./aggregations/recent-transactions.js";
+import { uptimeHistory } from "./aggregations/uptime.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -39,13 +50,14 @@ export interface HandlerDeps {
   db: Db;
   events: EventCache;
   views: ViewCache;
+  heartbeats: HeartbeatCache;
   starkscan: StarkscanClient;
   chain: string;
   pool: string;
 }
 
 export function createHandlers(deps: HandlerDeps) {
-  const { db, events, views, starkscan, chain, pool } = deps;
+  const { db, events, views, heartbeats, starkscan, chain, pool } = deps;
   const tokenMeta = new TokenMetaCache(db);
   const avnu = new AvnuTokenIndex();
 
@@ -91,6 +103,27 @@ export function createHandlers(deps: HandlerDeps) {
       return privateOpsSince(db, chain, pool, Date.now() - window);
     },
 
+    /**
+     * Windowed deposit + withdrawal counts (drawn from windowStats — the
+     * same source the 24h figures on pool-summary use). Activities panel on
+     * the dashboard fans this out as the live portion of "Most frequent
+     * activities" for a 30D window. Cached 30s per window.
+     */
+    async windowOps(opts: { windowMs?: number } = {}) {
+      const window = opts.windowMs ?? DAY_MS;
+      const key = `window-ops:${chain}:${pool}:${window}`;
+      const cached = views.get<unknown>(key);
+      if (cached) return cached;
+      const w = windowStats(db, chain, pool, Date.now() - window);
+      const result = {
+        windowMs: window,
+        deposits: w.deposits,
+        withdrawals: w.withdrawals,
+      };
+      views.put(key, result, 30_000);
+      return result;
+    },
+
     /** Active depositor count in window (default 24h). Addresses omitted by default. */
     async activeDepositors(opts: { windowMs?: number; withAddresses?: boolean } = {}) {
       const window = opts.windowMs ?? DAY_MS;
@@ -131,6 +164,111 @@ export function createHandlers(deps: HandlerDeps) {
         withdrawals24h: w.withdrawals,
         tvlChangeUsd24h: w.tvlChangeUsd,
       };
+    },
+
+    /**
+     * Per-token flows in a window + center aggregate stats. Drives the
+     * L2Beat-adapted hero chart. Window is whitelisted to {1h, 24h, 7d}.
+     * Cached 30s per window.
+     */
+    async flowsGraph(opts: { window?: FlowsGraphWindow } = {}) {
+      const win = opts.window ?? "7d";
+      if (!(win in FLOWS_GRAPH_WINDOWS_MS)) {
+        throw new Error(`window must be one of: ${Object.keys(FLOWS_GRAPH_WINDOWS_MS).join(", ")}`);
+      }
+      const windowMs = FLOWS_GRAPH_WINDOWS_MS[win];
+      const key = `flows-graph:${chain}:${pool}:${win}`;
+      const cached = views.get<unknown>(key);
+      if (cached) return cached;
+      const result = await flowsGraph(db, chain, pool, windowMs, {
+        currentTvl: async () => {
+          const t = await currentTvl(starkscan, db, views, tokenMeta, avnu, chain, pool);
+          return {
+            totalUsd: t.totalUsd,
+            perToken: t.perToken.map((p) => ({
+              address: p.address,
+              symbol: p.symbol,
+              decimals: p.decimals,
+              balanceUsd: p.balanceUsd,
+              priced: p.priced,
+            })),
+          };
+        },
+        anonymitySetUnspent: () => anonymitySet(db, chain, pool).unspent,
+      });
+      views.put(key, result, 30_000);
+      return result;
+    },
+
+    /**
+     * Withdrawal-broadcaster concentration (HHI + top share). Surfaces the
+     * paymaster-centralization dimension of the pool's privacy architecture.
+     * Cheap; not cached.
+     */
+    async relayerConcentration() {
+      return relayerConcentration(db, chain, pool);
+    },
+
+    /**
+     * Indexer uptime history derived from sync heartbeats. Returns one entry
+     * per UTC day (oldest → newest) with ok/degraded/incident/unknown plus
+     * the heartbeat-weighted aggregate percentage. Cached 60s.
+     *
+     * Once Uptime Kuma is deployed and pointed at /health, swap the body to
+     * fetch Kuma's status-page heartbeats instead — same UptimeHistory shape,
+     * frontend doesn't change.
+     */
+    async uptimeHistory(opts: { days?: number } = {}) {
+      const days = Math.max(1, Math.min(365, opts.days ?? 90));
+      const key = `uptime-history:${days}`;
+      const cached = views.get<unknown>(key);
+      if (cached) return cached;
+      const result = uptimeHistory(heartbeats, days);
+      views.put(key, result, 60_000);
+      return result;
+    },
+
+    /**
+     * Latest Deposit + Withdrawal events from the cache. Privacy-curated:
+     * depositor address and encrypted recipient blob are NOT emitted; the
+     * client renders those as "[private]". Cached 5s — fresh enough to feel
+     * live without pummeling the cache on every poll.
+     */
+    async recentTransactions(opts: { limit?: number } = {}) {
+      const limit = Math.max(1, Math.min(100, opts.limit ?? 20));
+      const key = `recent-tx:${chain}:${pool}:${limit}`;
+      const cached = views.get<unknown>(key);
+      if (cached) return cached;
+      const result = { transactions: recentTransactions(db, chain, pool, limit) };
+      views.put(key, result, 5_000);
+      return result;
+    },
+
+    /**
+     * All-time USD volume processed (deposits + withdrawals). Priced via the
+     * static token registry. Cached 60s — the scan walks every cached event.
+     */
+    /**
+     * Lifetime protocol revenue. fee_per_apply_actions × number of
+     * apply_actions calls (≈ distinct tx hashes in our event cache),
+     * priced in STRK then USD via the static token registry. Cached 60s
+     * because it walks every cached event for the distinct-tx count. */
+    async lifetimeRevenue() {
+      const key = `lifetime-revenue:${chain}:${pool}`;
+      const cached = views.get<unknown>(key);
+      if (cached) return cached;
+      const result = lifetimeRevenue(db, chain, pool);
+      views.put(key, result, 60_000);
+      return result;
+    },
+
+    async lifetimeVolume() {
+      const key = `lifetime-volume:${chain}:${pool}`;
+      const cached = views.get<unknown>(key);
+      if (cached) return cached;
+      const result = lifetimeVolume(db, chain, pool);
+      views.put(key, result, 60_000);
+      return result;
     },
 
     /** Per-protocol routed activity (AVNU, Vesu, Endur, Ekubo, Troves). */

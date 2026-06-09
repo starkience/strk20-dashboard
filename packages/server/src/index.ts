@@ -12,6 +12,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { StarkscanClient } from "@strk20/core";
 import { openCache, EventCache, ViewCache } from "./cache/index.js";
+import { HeartbeatCache } from "./cache/heartbeats.js";
 import { createHandlers } from "./handlers.js";
 
 const BASE_URL = required("STARKSCAN_BASE_URL");
@@ -25,6 +26,7 @@ const CORS_ORIGIN = process.env.API_CORS_ORIGIN ?? "*";
 const db = openCache(CACHE_PATH);
 const events = new EventCache(db);
 const views = new ViewCache(db);
+const heartbeats = new HeartbeatCache(db);
 
 const starkscan = new StarkscanClient({
   baseUrl: BASE_URL,
@@ -32,7 +34,7 @@ const starkscan = new StarkscanClient({
   chain: CHAIN,
 });
 
-const h = createHandlers({ db, events, views, starkscan, chain: CHAIN, pool: POOL });
+const h = createHandlers({ db, events, views, heartbeats, starkscan, chain: CHAIN, pool: POOL });
 
 const app = new Hono();
 app.use("/*", cors({ origin: CORS_ORIGIN }));
@@ -46,6 +48,10 @@ app.get("/agg/private-ops", async (c) => {
   const windowMs = Number(c.req.query("window_ms") ?? 24 * 60 * 60 * 1000);
   return c.json(await h.privateOps({ windowMs }));
 });
+app.get("/agg/window-ops", async (c) => {
+  const windowMs = Number(c.req.query("window_ms") ?? 24 * 60 * 60 * 1000);
+  return c.json(await h.windowOps({ windowMs }));
+});
 app.get("/agg/active-depositors", async (c) => {
   const windowMs = Number(c.req.query("window_ms") ?? 24 * 60 * 60 * 1000);
   return c.json(await h.activeDepositors({ windowMs }));
@@ -55,6 +61,25 @@ app.get("/agg/note-ages", async (c) => c.json(await h.noteAges()));
 app.get("/agg/tvl", async (c) => c.json(await h.tvl()));
 app.get("/agg/pool-summary", async (c) => c.json(await h.poolSummary()));
 app.get("/agg/active-protocols", async (c) => c.json(await h.activeProtocols()));
+app.get("/agg/lifetime-volume", async (c) => c.json(await h.lifetimeVolume()));
+app.get("/agg/lifetime-revenue", async (c) => c.json(await h.lifetimeRevenue()));
+app.get("/agg/relayer-concentration", async (c) => c.json(await h.relayerConcentration()));
+app.get("/agg/uptime-history", async (c) => {
+  const days = Number(c.req.query("days") ?? 90);
+  return c.json(await h.uptimeHistory({ days }));
+});
+app.get("/agg/recent-transactions", async (c) => {
+  const limit = Number(c.req.query("limit") ?? 20);
+  return c.json(await h.recentTransactions({ limit }));
+});
+app.get("/agg/flows-graph", async (c) => {
+  const window = (c.req.query("window") ?? "7d") as "1h" | "24h" | "7d";
+  try {
+    return c.json(await h.flowsGraph({ window }));
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 400);
+  }
+});
 app.get("/agg/top-callers", async (c) => {
   const limit = Number(c.req.query("limit") ?? 25);
   return c.json(await h.topCallers({ limit }));
@@ -101,10 +126,12 @@ async function runAutoSync() {
   setInterval(async () => {
     try {
       const r = await h.sync({ maxPages: 50 });
+      heartbeats.record(true, r.eventsInserted);
       if (r.eventsInserted > 0) {
         console.log(`sync[${r.phase}]: +${r.eventsInserted} (head ${r.lastBlock ?? "—"})`);
       }
     } catch (e) {
+      heartbeats.record(false, 0, (e as Error).message);
       console.error("sync error:", (e as Error).message);
     }
   }, SYNC_INTERVAL_MS);
