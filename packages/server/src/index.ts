@@ -100,8 +100,11 @@ app.get("/events/sample", async (c) => {
   return c.json(await h.eventSample(kind ? { kind, limit } : { limit }));
 });
 
-serve({ fetch: app.fetch, port: PORT }, (info) => {
-  console.log(`strk20 server listening on http://localhost:${info.port}`);
+// hostname 0.0.0.0 is required on Railway/most PaaS: a localhost-bound
+// server is invisible to the platform's healthcheck and public proxy
+// (works locally, fails in the container otherwise).
+serve({ fetch: app.fetch, port: PORT, hostname: "0.0.0.0" }, (info) => {
+  console.log(`strk20 server listening on 0.0.0.0:${info.port}`);
   console.log(`  chain=${CHAIN} pool=${POOL.slice(0, 10)}…`);
   console.log(`  cache=${CACHE_PATH}`);
 });
