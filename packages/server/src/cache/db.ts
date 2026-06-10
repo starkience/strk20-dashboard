@@ -51,6 +51,12 @@ CREATE TABLE IF NOT EXISTS token_meta (
   fetched_at  INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS token_prices (
+  address     TEXT PRIMARY KEY,
+  usd         REAL NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS view_cache (
   key         TEXT PRIMARY KEY,
   value_json  TEXT NOT NULL,

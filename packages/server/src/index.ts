@@ -14,13 +14,15 @@ import { StarkscanClient } from "@strk20/core";
 import { openCache, EventCache, ViewCache } from "./cache/index.js";
 import { HeartbeatCache } from "./cache/heartbeats.js";
 import { createHandlers } from "./handlers.js";
+import { startTokenSync } from "./services/token-sync.js";
 
 const BASE_URL = required("STARKSCAN_BASE_URL");
 const API_KEY = required("STARKSCAN_API_KEY");
 const CHAIN = process.env.STARKSCAN_CHAIN ?? "SN_MAIN";
 const POOL = required("STRK20_POOL_ADDRESS");
 const CACHE_PATH = process.env.CACHE_DB_PATH ?? "./data/cache.db";
-const PORT = Number(process.env.API_PORT ?? 8787);
+// Railway (and most PaaS) inject PORT; API_PORT wins for local dev.
+const PORT = Number(process.env.API_PORT ?? process.env.PORT ?? 8787);
 const CORS_ORIGIN = process.env.API_CORS_ORIGIN ?? "*";
 
 const db = openCache(CACHE_PATH);
@@ -138,6 +140,9 @@ async function runAutoSync() {
 }
 
 runAutoSync().catch((e) => console.error("auto-sync failed:", e));
+
+// Token discovery + live USD pricing (Starkscan metadata, CoinGecko prices).
+startTokenSync({ db, starkscan, chain: CHAIN, pool: POOL });
 
 function required(key: string): string {
   const v = process.env[key];

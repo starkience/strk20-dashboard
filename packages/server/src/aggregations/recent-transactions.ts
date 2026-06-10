@@ -11,15 +11,16 @@ import {
 /**
  * Most recent Deposit + Withdrawal events from the cached pool event stream.
  *
- * Privacy posture:
- *   - We return the on-chain-visible data only (txHash, kind, token, amount,
- *     usd-if-priced, timestamp, and the routing peer if any).
- *   - We deliberately omit `Deposit.user_addr` (the cleartext depositor) and
- *     `Withdrawal.enc_user_addr` (the encrypted recipient blob). Either field
- *     would let a viewer trivially track per-user activity from the dashboard.
- *   - For Withdrawals we surface `to_addr` only when it matches a registered
- *     paymaster/router (currently AVNU Forwarder ≈ 88% of withdrawals); when
- *     it's an unattributed address the client renders it as "[private]".
+ * Transparency posture — represent exactly what the chain shows:
+ *   - PUBLIC on-chain, so we return it: `Deposit.user_addr` (depositing is a
+ *     public act; Starkscan shows it) and `Withdrawal.to_addr` (often AVNU's
+ *     paymaster/forwarder executing on the real recipient's behalf — when it
+ *     matches a registered protocol we attach the label so viewers know the
+ *     address is infrastructure, not the end user).
+ *   - PRIVATE cryptographically, so there is nothing to return: the deposit's
+ *     in-pool recipient (encrypted note) and the withdrawal's funding source
+ *     (`enc_user_addr`, an encrypted blob shielded by the anonymity set).
+ *     The client renders those slots as shielded.
  */
 
 export type TxKind = "Deposit" | "Withdrawal";
@@ -36,10 +37,10 @@ export interface RecentTransaction {
   /** USD value if the token is in the static price registry, else null. */
   amountUsd: number | null;
   /**
-   * The on-chain peer of the user-private side:
-   *   - Deposit: undefined (the depositor is intentionally masked).
-   *   - Withdrawal: the `to_addr` (paymaster or recipient). null when we
-   *     choose to mask it to avoid encouraging per-recipient tracking.
+   * The publicly visible on-chain party:
+   *   - Deposit: the depositor (`user_addr` from the event keys).
+   *   - Withdrawal: the `to_addr` — frequently AVNU's paymaster/forwarder
+   *     rather than the end recipient; `label` says so when attributable.
    */
   peer: {
     /** Short-form address for display. */
@@ -97,7 +98,11 @@ function decode(r: Row): RecentTransaction {
   const tokenAddress = normalizeHex(r.topic2 ?? "0x0");
   const meta = lookupToken(tokenAddress);
   const decimals = meta?.decimals ?? 18;
-  const symbol = meta?.symbol ?? "?";
+  // Token sync registers every token the pool has seen, so a miss only
+  // happens in the brief window before first discovery completes — show
+  // the short address rather than an opaque "?".
+  const symbol =
+    meta?.symbol ?? `${tokenAddress.slice(0, 6)}…${tokenAddress.slice(-4)}`;
 
   // Amount index differs by kind: Deposit.data[0], Withdrawal.data[3].
   const data = safeParseStrArray(r.data_json);
@@ -106,9 +111,9 @@ function decode(r: Row): RecentTransaction {
   const amountUsd =
     meta && meta.usdApprox > 0 ? amountHuman * meta.usdApprox : null;
 
-  const peer = isDeposit
-    ? null
-    : buildWithdrawalPeer(r.topic1 ?? "0x0");
+  // topic1 is the public party for both kinds: Deposit.user_addr /
+  // Withdrawal.to_addr (see decoder.ts event layouts).
+  const peer = buildPeer(r.topic1 ?? "0x0");
 
   return {
     txHash: r.tx_hash,
@@ -117,13 +122,13 @@ function decode(r: Row): RecentTransaction {
     kind,
     tokenAddress,
     tokenSymbol: symbol,
-    amount: formatAmount(amountHuman, decimals),
+    amount: formatAmount(amountHuman),
     amountUsd,
     peer,
   };
 }
 
-function buildWithdrawalPeer(rawAddr: string) {
+function buildPeer(rawAddr: string) {
   const addr = normalizeAddress(rawAddr);
   const protocolId = protocolForAddress(addr);
   return {
@@ -152,13 +157,15 @@ function safeParseStrArray(s: string): string[] {
   }
 }
 
-function formatAmount(n: number, decimals: number): string {
+function formatAmount(n: number): string {
   if (!isFinite(n)) return "0";
   if (n === 0) return "0";
-  // Mirror the visual we want in the log: trim trailing zeros, cap precision.
-  const cap = Math.min(8, Math.max(2, decimals <= 6 ? 4 : 8));
-  const s = n.toFixed(cap);
-  return s.replace(/\.?0+$/, "");
+  // Two decimals max across the board, so the log stays scannable even
+  // for huge meme-token amounts. Dust below 0.01 (common for BTC-likes)
+  // shows as "<0.01" rather than a misleading "0.00" — the USD value in
+  // parentheses carries the real magnitude.
+  if (n < 0.01) return "<0.01";
+  return n.toFixed(2);
 }
 
 function shortAddr(addr: string): string {

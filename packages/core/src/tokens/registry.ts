@@ -1,9 +1,16 @@
 /**
  * Token registry for tokens deposited into the STRK20 privacy pool.
  *
- * Metadata (symbol + decimals) is sourced from Starkscan's /token/{addr}
- * endpoint — verified May 26 2026. USD prices are placeholders that should
- * be replaced with a live price feed (CoinGecko/Pyth) before launch.
+ * This is a RUNTIME STORE, not a hardcoded list. The server populates it:
+ *   - metadata (symbol/name/decimals) for every token the pool has seen,
+ *     resolved from Starkscan / the AVNU list and registered via
+ *     `registerToken` (see server/src/services/token-sync.ts)
+ *   - USD prices pushed via `setTokenPrice` from a live feed
+ *
+ * The seeds below carry ONLY stable on-chain facts (symbol/decimals,
+ * verified against Starkscan) so the majors render correctly before the
+ * first sync completes. They deliberately carry NO prices — usdApprox
+ * stays 0 until the live feed reports, so we never display stale values.
  */
 
 import { normalizeHex } from "../decoder/selectors.js";
@@ -13,18 +20,18 @@ export interface TokenMeta {
   symbol: string;
   name: string;
   decimals: number;
-  /** Approximate USD price. TODO: swap for live feed. */
+  /** USD price from the live feed; 0 = not priced (yet). */
   usdApprox: number;
   coingeckoId: string | null;
 }
 
-const _REGISTRY: TokenMeta[] = [
+const SEEDS: TokenMeta[] = [
   {
     address: "0x4718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d",
     symbol: "STRK",
     name: "Starknet Token",
     decimals: 18,
-    usdApprox: 0.15,
+    usdApprox: 0,
     coingeckoId: "starknet",
   },
   {
@@ -32,7 +39,9 @@ const _REGISTRY: TokenMeta[] = [
     symbol: "strkBTC",
     name: "strkBTC",
     decimals: 8,
-    usdApprox: 95_000,
+    usdApprox: 0,
+    // BTC-pegged wrapper, not listed on CoinGecko by contract — priced at
+    // BTC parity via the id, same convention Starkscan uses.
     coingeckoId: "bitcoin",
   },
   {
@@ -40,7 +49,7 @@ const _REGISTRY: TokenMeta[] = [
     symbol: "xstrkBTC",
     name: "Endur xstrkBTC",
     decimals: 8,
-    usdApprox: 95_000,
+    usdApprox: 0,
     coingeckoId: "bitcoin",
   },
   {
@@ -48,7 +57,7 @@ const _REGISTRY: TokenMeta[] = [
     symbol: "WBTC",
     name: "Wrapped BTC",
     decimals: 8,
-    usdApprox: 95_000,
+    usdApprox: 0,
     coingeckoId: "bitcoin",
   },
   {
@@ -62,14 +71,42 @@ const _REGISTRY: TokenMeta[] = [
 ];
 
 const ADDRESS_INDEX = new Map<string, TokenMeta>(
-  _REGISTRY.map((t) => [normalizeHex(t.address), t])
+  SEEDS.map((t) => [normalizeHex(t.address), t])
 );
 
 export function lookupToken(address: string): TokenMeta | null {
   return ADDRESS_INDEX.get(normalizeHex(address)) ?? null;
 }
 
-export const KNOWN_TOKENS = _REGISTRY;
+/**
+ * Register (or refresh) a token's metadata. Called by the server's token
+ * sync for every token discovered in pool events. Preserves an existing
+ * price unless the caller supplies a non-zero one.
+ */
+export function registerToken(meta: TokenMeta): void {
+  const key = normalizeHex(meta.address);
+  const existing = ADDRESS_INDEX.get(key);
+  ADDRESS_INDEX.set(key, {
+    ...meta,
+    address: key,
+    usdApprox: meta.usdApprox > 0 ? meta.usdApprox : existing?.usdApprox ?? 0,
+    coingeckoId: meta.coingeckoId ?? existing?.coingeckoId ?? null,
+  });
+}
+
+/** Push a live USD price for a token. No-op if the token is unknown. */
+export function setTokenPrice(address: string, usd: number): void {
+  const t = ADDRESS_INDEX.get(normalizeHex(address));
+  if (t && isFinite(usd) && usd >= 0) t.usdApprox = usd;
+}
+
+/** All currently registered tokens (snapshot copy). */
+export function allTokens(): TokenMeta[] {
+  return [...ADDRESS_INDEX.values()];
+}
+
+/** @deprecated static view kept for older callers; prefer allTokens(). */
+export const KNOWN_TOKENS = SEEDS;
 
 /** Convert a raw u128 amount string/bigint to a float in token units. */
 export function applyDecimals(rawAmount: bigint | string, decimals: number): number {

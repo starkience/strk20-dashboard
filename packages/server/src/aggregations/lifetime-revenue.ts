@@ -13,8 +13,12 @@ import { EVENT_SELECTORS, lookupToken } from "@strk20/core";
  *     revenue_wei = number_of_apply_actions_calls × current_fee_wei
  *
  * We approximate `apply_actions` count by the number of DISTINCT
- * tx hashes among all pool events in the cache: each pool tx is
- * exactly one apply_actions call.
+ * tx hashes among pool events AT OR AFTER the block where the fee
+ * was first set (excluding the FeeAmountSet admin tx itself): txs
+ * before that block paid no fee, so counting them overstated revenue
+ * by ~260 STRK vs Starkscan's "privacy fees collected" tracker,
+ * which sums actual transfers to the fee collector. With this window
+ * the two agree to within the day's not-yet-bucketed fees.
  *
  * Current fee is the latest `FeeAmountSet` event we've seen (latest
  * block, latest log index). If no FeeAmountSet has been observed yet
@@ -35,9 +39,10 @@ export interface LifetimeRevenue {
   applyActionsCount: number;
   currentFeeWei: string;        // u128 fee per call, decimal stringified
   currentFeeStrk: number;       // currentFeeWei / 10^18 (display approx)
+  currentFeeUsd: number | null; // currentFeeStrk × live STRK price (null until priced)
   revenueWei: string;           // applyActionsCount × currentFeeWei
   revenueStrk: number;          // revenueWei / 10^18
-  revenueUsd: number;           // revenueStrk × STRK price
+  revenueUsd: number | null;    // revenueStrk × live STRK price (null until priced)
   feeChanges: number;           // number of FeeAmountSet events observed
 }
 
@@ -46,34 +51,47 @@ export function lifetimeRevenue(
   chain: string,
   pool: string
 ): LifetimeRevenue {
-  // 1. apply_actions count ≈ distinct tx_hash in our event cache.
-  const txRow = db
-    .prepare(
-      `SELECT COUNT(DISTINCT tx_hash) AS n
-       FROM raw_events
-       WHERE chain = ? AND contract = ?`
-    )
-    .get(chain, pool) as { n: number };
-  const applyActionsCount = Number(txRow?.n ?? 0);
-
-  // 2. Current fee = latest FeeAmountSet event by (block, log_index).
+  // 1. Current fee = latest FeeAmountSet event by (block, log_index);
+  //    fee activation = earliest one (txs before it paid nothing).
   const feeRows = db
     .prepare(
-      `SELECT data_json
+      `SELECT block_number, tx_hash, data_json
        FROM raw_events
        WHERE chain = ? AND contract = ? AND topic0 = ?
        ORDER BY block_number DESC, log_index DESC`
     )
-    .all(chain, pool, EVENT_SELECTORS.FeeAmountSet) as { data_json: string }[];
+    .all(chain, pool, EVENT_SELECTORS.FeeAmountSet) as {
+    block_number: number;
+    tx_hash: string;
+    data_json: string;
+  }[];
 
   let currentFeeWei = 0n;
-  if (feeRows.length > 0) {
+  const latestFeeSet = feeRows[0];
+  if (latestFeeSet) {
     try {
-      const data = JSON.parse(feeRows[0].data_json) as string[];
+      const data = JSON.parse(latestFeeSet.data_json) as string[];
       if (data[0]) currentFeeWei = BigInt(data[0]);
     } catch {
       /* malformed event — leave fee at zero */
     }
+  }
+
+  // 2. apply_actions count ≈ distinct tx_hash since the fee went live,
+  //    minus the FeeAmountSet admin tx itself (it paid no fee).
+  const firstFeeSet = feeRows[feeRows.length - 1];
+  let applyActionsCount = 0;
+  if (firstFeeSet) {
+    const txRow = db
+      .prepare(
+        `SELECT COUNT(DISTINCT tx_hash) AS n
+         FROM raw_events
+         WHERE chain = ? AND contract = ? AND block_number >= ? AND tx_hash != ?`
+      )
+      .get(chain, pool, firstFeeSet.block_number, firstFeeSet.tx_hash) as {
+      n: number;
+    };
+    applyActionsCount = Number(txRow?.n ?? 0);
   }
 
   // 3. Revenue = apply_actions × fee (in STRK wei).
@@ -84,17 +102,20 @@ export function lifetimeRevenue(
   const denom = 10n ** BigInt(STRK_DECIMALS);
   const revenueStrk = Number(revenueWei) / Number(denom);
   const currentFeeStrk = Number(currentFeeWei) / Number(denom);
-  const strkMeta = lookupToken(STRK_ADDR);
-  const strkPrice = strkMeta?.usdApprox ?? 0;
-  const revenueUsd = revenueStrk * strkPrice;
+  // Live STRK price pushed into the registry by the token-sync service;
+  // null (not 0) while unpriced so clients can distinguish "no price yet"
+  // from "worthless".
+  const strkPrice = lookupToken(STRK_ADDR)?.usdApprox ?? 0;
+  const priced = strkPrice > 0;
 
   return {
     applyActionsCount,
     currentFeeWei: currentFeeWei.toString(),
     currentFeeStrk,
+    currentFeeUsd: priced ? currentFeeStrk * strkPrice : null,
     revenueWei: revenueWei.toString(),
     revenueStrk,
-    revenueUsd,
+    revenueUsd: priced ? revenueStrk * strkPrice : null,
     feeChanges: feeRows.length,
   };
 }
