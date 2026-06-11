@@ -7,6 +7,7 @@ import {
   normalizeAddress,
   protocolForAddress,
 } from "@strk20/core";
+import { classifyRoundTrip } from "./window.js";
 
 /**
  * Most recent Deposit + Withdrawal events from the cached pool event stream.
@@ -23,7 +24,7 @@ import {
  *     The client renders those slots as shielded.
  */
 
-export type TxKind = "Deposit" | "Withdrawal";
+export type TxKind = "Deposit" | "Withdrawal" | "Swap" | "Stake" | "Lend";
 
 export interface RecentTransaction {
   txHash: string;
@@ -50,6 +51,17 @@ export interface RecentTransaction {
     /** Human-readable label (e.g. "AVNU paymaster") when attributed. */
     label: string | null;
   } | null;
+  /**
+   * For conversion kinds (Swap/Stake/Lend) only: the leg that came BACK
+   * into the pool. The top-level token/amount fields describe the out
+   * leg, so a swap renders "3000 STRK → 102.56 USDC".
+   */
+  inLeg?: {
+    tokenAddress: string;
+    tokenSymbol: string;
+    amount: string;
+    amountUsd: number | null;
+  };
 }
 
 interface Row {
@@ -66,6 +78,7 @@ interface Row {
 
 const DEPOSIT_SEL = EVENT_SELECTORS.Deposit;
 const WITHDRAWAL_SEL = EVENT_SELECTORS.Withdrawal;
+const OPEN_NOTE_SEL = EVENT_SELECTORS.OpenNoteDeposited;
 
 export function recentTransactions(
   db: Db,
@@ -74,19 +87,108 @@ export function recentTransactions(
   limit: number,
 ): RecentTransaction[] {
   const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+  // Over-fetch (each conversion collapses several events into one
+  // entry) then group by transaction so private swaps render as ONE
+  // "Swap" item with both legs, not as a bare withdrawal. The return
+  // leg of a swap arrives via OpenNoteDeposited, not Deposit.
   const rows = db
     .prepare(
       `SELECT tx_hash, block_number, log_index, topic0, topic1, topic2, topic3,
               data_json, timestamp_iso
          FROM raw_events
         WHERE chain = ? AND contract = ?
-          AND (topic0 = ? OR topic0 = ?)
+          AND topic0 IN (?, ?, ?)
         ORDER BY block_number DESC, log_index DESC
         LIMIT ?`,
     )
-    .all(chain, pool, DEPOSIT_SEL, WITHDRAWAL_SEL, safeLimit) as Row[];
+    .all(chain, pool, DEPOSIT_SEL, WITHDRAWAL_SEL, OPEN_NOTE_SEL, safeLimit * 4) as Row[];
 
-  return rows.map((r) => decode(r));
+  // Group rows per tx, preserving recency order of first appearance.
+  const order: string[] = [];
+  const byTx = new Map<string, Row[]>();
+  for (const r of rows) {
+    if (!byTx.has(r.tx_hash)) {
+      byTx.set(r.tx_hash, []);
+      order.push(r.tx_hash);
+    }
+    byTx.get(r.tx_hash)!.push(r);
+  }
+
+  const out: RecentTransaction[] = [];
+  for (const hash of order) {
+    if (out.length >= safeLimit) break;
+    const txRows = byTx.get(hash)!;
+    const wds = txRows.filter((r) => normalizeHex(r.topic0) === normalizeHex(WITHDRAWAL_SEL));
+    const ins = txRows.filter((r) => normalizeHex(r.topic0) !== normalizeHex(WITHDRAWAL_SEL));
+    const outTokens = new Set(wds.map((r) => normalizeHex(r.topic2 ?? "0x0")));
+    const inTokens = new Set(ins.map((r) => normalizeHex(r.topic2 ?? "0x0")));
+    const kind = classifyRoundTrip(outTokens, inTokens);
+    if (kind) {
+      out.push(conversionEntry(kind, txRows, wds, ins, outTokens, inTokens));
+    } else {
+      for (const r of txRows) {
+        if (out.length >= safeLimit) break;
+        out.push(decode(r));
+      }
+    }
+  }
+  return out;
+}
+
+/** Sum a leg's rows for one token into display fields. */
+function legFields(rowsForToken: Row[], token: string, amountIndex: (r: Row) => number) {
+  const meta = lookupToken(token);
+  const decimals = meta?.decimals ?? 18;
+  const symbol = meta?.symbol ?? `${token.slice(0, 6)}…${token.slice(-4)}`;
+  let raw = 0n;
+  for (const r of rowsForToken) {
+    try {
+      const data = JSON.parse(r.data_json) as string[];
+      raw += BigInt(data[amountIndex(r)] ?? "0x0");
+    } catch { /* skip malformed row */ }
+  }
+  const human = applyDecimals(raw, decimals);
+  return {
+    tokenAddress: token,
+    tokenSymbol: symbol,
+    amount: formatAmount(human),
+    amountUsd: meta && meta.usdApprox > 0 ? human * meta.usdApprox : null,
+  };
+}
+
+function conversionEntry(
+  kind: "swap" | "stake" | "lend",
+  txRows: Row[],
+  wds: Row[],
+  ins: Row[],
+  outTokens: Set<string>,
+  inTokens: Set<string>,
+): RecentTransaction {
+  // Display tokens: prefer the ones that actually crossed (ignore
+  // same-token change notes), fall back to whatever is there.
+  const crossOut = [...outTokens].find((t) => !inTokens.has(t)) ?? [...outTokens][0]!;
+  const crossIn = [...inTokens].find((t) => !outTokens.has(t)) ?? [...inTokens][0]!;
+  const outLeg = legFields(
+    wds.filter((r) => normalizeHex(r.topic2 ?? "0x0") === crossOut),
+    crossOut,
+    () => 3, // Withdrawal amount at data[3]
+  );
+  const inLeg = legFields(
+    ins.filter((r) => normalizeHex(r.topic2 ?? "0x0") === crossIn),
+    crossIn,
+    () => 0, // Deposit + OpenNoteDeposited amounts at data[0]
+  );
+  const first = txRows[0]!;
+  const firstWd = wds[0];
+  return {
+    txHash: first.tx_hash,
+    blockNumber: first.block_number,
+    timestampIso: first.timestamp_iso,
+    kind: kind === "swap" ? "Swap" : kind === "stake" ? "Stake" : "Lend",
+    ...outLeg,
+    peer: firstWd ? buildPeer(firstWd.topic1 ?? "0x0") : null,
+    inLeg,
+  };
 }
 
 function decode(r: Row): RecentTransaction {
