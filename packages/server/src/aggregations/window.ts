@@ -109,7 +109,7 @@ export function windowConversions(
  * Vesu; pUSDC). Checked both directions so unwinds count in the same
  * bucket as entries.
  */
-function wrapKind(a: string, b: string): "stake" | "lend" | null {
+export function wrapKind(a: string, b: string): "stake" | "lend" | null {
   const sa = lookupToken(a)?.symbol;
   const sb = lookupToken(b)?.symbol;
   if (!sa || !sb) return null;

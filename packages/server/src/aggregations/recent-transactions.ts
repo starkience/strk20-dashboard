@@ -7,7 +7,7 @@ import {
   normalizeAddress,
   protocolForAddress,
 } from "@strk20/core";
-import { classifyRoundTrip } from "./window.js";
+import { classifyRoundTrip, wrapKind } from "./window.js";
 
 /**
  * Most recent Deposit + Withdrawal events from the cached pool event stream.
@@ -166,8 +166,23 @@ function conversionEntry(
 ): RecentTransaction {
   // Display tokens: prefer the ones that actually crossed (ignore
   // same-token change notes), fall back to whatever is there.
-  const crossOut = [...outTokens].find((t) => !inTokens.has(t)) ?? [...outTokens][0]!;
-  const crossIn = [...inTokens].find((t) => !outTokens.has(t)) ?? [...inTokens][0]!;
+  let crossOut = [...outTokens].find((t) => !inTokens.has(t)) ?? [...outTokens][0]!;
+  let crossIn = [...inTokens].find((t) => !outTokens.has(t)) ?? [...inTokens][0]!;
+  // For stake/lend entries show the pair that actually wrapped: a
+  // multi-leg tx that withdrew xSTRK + WBTC and staked into xWBTC
+  // should read "WBTC -> xWBTC", not "xSTRK -> xWBTC".
+  if (kind !== "swap") {
+    outer: for (const i of inTokens) {
+      if (outTokens.has(i)) continue;
+      for (const o of outTokens) {
+        if (wrapKind(o, i)) {
+          crossOut = o;
+          crossIn = i;
+          break outer;
+        }
+      }
+    }
+  }
   const outLeg = legFields(
     wds.filter((r) => normalizeHex(r.topic2 ?? "0x0") === crossOut),
     crossOut,
