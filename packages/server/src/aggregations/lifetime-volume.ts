@@ -7,7 +7,9 @@ import {
 } from "@strk20/core";
 
 export interface LifetimeVolume {
-  /** USD value of all deposits since genesis (priced via the token registry). */
+  /** USD value of all inflows since genesis: Deposit events PLUS
+   *  OpenNoteDeposited (swap/stake/lend return legs and direct
+   *  open-note funding). Priced via the token registry. */
   depositsUsd: number;
   /** USD value of all withdrawals since genesis. */
   withdrawalsUsd: number;
@@ -28,14 +30,17 @@ export interface LifetimeVolume {
  */
 export function lifetimeVolume(db: Db, chain: string, pool: string): LifetimeVolume {
   const dep = flowAll(db, chain, pool, EVENT_SELECTORS.Deposit, 0);
+  // Swap/stake/lend return legs enter via deposit_to_open_note, not
+  // Deposit — without this a swap contributed only its out leg.
+  const ond = flowAll(db, chain, pool, EVENT_SELECTORS.OpenNoteDeposited, 0);
   const wd = flowAll(db, chain, pool, EVENT_SELECTORS.Withdrawal, 3);
   return {
-    depositsUsd: dep.usd,
+    depositsUsd: dep.usd + ond.usd,
     withdrawalsUsd: wd.usd,
-    totalUsd: dep.usd + wd.usd,
-    depositCount: dep.count,
+    totalUsd: dep.usd + ond.usd + wd.usd,
+    depositCount: dep.count + ond.count,
     withdrawalCount: wd.count,
-    partial: dep.partial || wd.partial,
+    partial: dep.partial || ond.partial || wd.partial,
   };
 }
 

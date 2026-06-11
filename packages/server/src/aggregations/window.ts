@@ -28,6 +28,8 @@ export function windowStats(
 
   let net = 0;
   net += flowUsd(db, chain, pool, EVENT_SELECTORS.Deposit, sinceIso, 0);
+  // Open-note funding (swap returns etc.) is an inflow too.
+  net += flowUsd(db, chain, pool, EVENT_SELECTORS.OpenNoteDeposited, sinceIso, 0);
   net -= flowUsd(db, chain, pool, EVENT_SELECTORS.Withdrawal, sinceIso, 3);
 
   return { deposits, withdrawals, tvlChangeUsd: net };
