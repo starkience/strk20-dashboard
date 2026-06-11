@@ -2,6 +2,7 @@ export { decodeEvent } from "./decoder.js";
 export {
   EVENT_NAMES,
   EVENT_SELECTORS,
+  OZ_SELECTORS,
   SELECTOR_TO_NAME,
   normalizeHex,
   type EventName,
