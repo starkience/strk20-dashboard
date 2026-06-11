@@ -137,24 +137,35 @@ export function classifyRoundTrip(
   const crossIns = [...ins].filter((t) => !outs.has(t));
   const crossOuts = [...outs].filter((t) => !ins.has(t));
   if (crossIns.length === 0 && crossOuts.length === 0) return null;
-  const kinds: ("swap" | "stake" | "lend")[] = [];
+  // Stake/lend only when the wrap explains EVERY crossing leg in BOTH
+  // directions. A tx that withdrew xSTRK + WBTC and received only
+  // xWBTC staked the WBTC — but the xSTRK leg was converted, so the
+  // transaction as a whole is a swap. Any unexplained leg → swap.
+  const kinds: ("stake" | "lend")[] = [];
+  const usedOuts = new Set<string>();
   for (const i of crossIns) {
-    let k: "swap" | "stake" | "lend" = "swap";
+    let matched: "stake" | "lend" | null = null;
     for (const o of outs) {
       const w = wrapKind(o, i);
-      if (w) { k = w; break; }
+      if (w) { matched = w; usedOuts.add(o); break; }
     }
-    kinds.push(k);
+    if (!matched) return "swap";
+    kinds.push(matched);
   }
   for (const o of crossOuts) {
-    if (crossIns.length > 0) break; // already classified by what came in
-    let k: "swap" | "stake" | "lend" = "swap";
-    for (const i of ins) {
-      const w = wrapKind(o, i);
-      if (w) { k = w; break; }
+    if (!usedOuts.has(o)) {
+      // An out-leg no wrap accounts for. With no wrapped ins at all
+      // this is the unwrap direction — check it against the ins.
+      let matched: "stake" | "lend" | null = null;
+      for (const i of ins) {
+        const w = wrapKind(o, i);
+        if (w) { matched = w; break; }
+      }
+      if (!matched) return "swap";
+      kinds.push(matched);
     }
-    kinds.push(k);
   }
+  if (kinds.length === 0) return "swap";
   if (kinds.every((k) => k === "stake")) return "stake";
   if (kinds.every((k) => k === "lend")) return "lend";
   return "swap";
