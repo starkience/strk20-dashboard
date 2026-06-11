@@ -45,6 +45,7 @@ import {
 import { relayerConcentration } from "./aggregations/relayer-concentration.js";
 import { recentTransactions } from "./aggregations/recent-transactions.js";
 import { uptimeHistory } from "./aggregations/uptime.js";
+import { contractUptime } from "./aggregations/contract-uptime.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -247,6 +248,17 @@ export function createHandlers(deps: HandlerDeps) {
      * fetch Kuma's status-page heartbeats instead — same UptimeHistory shape,
      * frontend doesn't change.
      */
+    /** Contract uptime since launch (Paused/Unpaused events). The old
+     *  heartbeat-based metric remains at indexerUptime for ops use. */
+    async contractUptime() {
+      const key = `contract-uptime:${chain}:${pool}`;
+      const cached = views.get<unknown>(key);
+      if (cached) return cached;
+      const result = contractUptime(db, chain, pool);
+      views.put(key, result, 5 * 60_000);
+      return result;
+    },
+
     async uptimeHistory(opts: { days?: number } = {}) {
       const days = Math.max(1, Math.min(365, opts.days ?? 90));
       const key = `uptime-history:${days}`;

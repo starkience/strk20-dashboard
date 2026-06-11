@@ -68,6 +68,7 @@ app.get("/agg/lifetime-revenue", async (c) => c.json(await h.lifetimeRevenue()))
 app.get("/agg/lifetime-conversions", async (c) => c.json(await h.lifetimeConversions()));
 app.get("/agg/tvl-history", async (c) => c.json(await h.tvlHistory()));
 app.get("/agg/relayer-concentration", async (c) => c.json(await h.relayerConcentration()));
+app.get("/agg/contract-uptime", async (c) => c.json(await h.contractUptime()));
 app.get("/agg/uptime-history", async (c) => {
   const days = Number(c.req.query("days") ?? 90);
   return c.json(await h.uptimeHistory({ days }));

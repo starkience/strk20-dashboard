@@ -32,23 +32,27 @@ export interface TvlHistory {
 }
 
 export function tvlHistory(db: Db, chain: string, pool: string): TvlHistory {
+  // Inflows are Deposit AND OpenNoteDeposited (private-swap settlement
+  // funds an open note; amount at data[0] for both, token in topic2) —
+  // leaving the latter out made the series run ~0.3% under live TVL.
   const rows = db
     .prepare(
       `SELECT substr(timestamp_iso, 1, 10) AS day, topic0, topic2, data_json
        FROM raw_events
-       WHERE chain=? AND contract=? AND topic0 IN (?, ?)
+       WHERE chain=? AND contract=? AND topic0 IN (?, ?, ?)
        ORDER BY timestamp_iso ASC`
     )
     .all(
       chain,
       pool,
       EVENT_SELECTORS.Deposit,
+      EVENT_SELECTORS.OpenNoteDeposited,
       EVENT_SELECTORS.Withdrawal
     ) as { day: string; topic0: string; topic2: string | null; data_json: string }[];
 
   if (rows.length === 0) return { days: [], pricedAt: "current" };
 
-  const DEP = normalizeHex(EVENT_SELECTORS.Deposit);
+  const WD = normalizeHex(EVENT_SELECTORS.Withdrawal);
   // Running raw balance per token, mutated day by day.
   const net = new Map<string, bigint>();
   const days: TvlHistoryPoint[] = [];
@@ -80,9 +84,9 @@ export function tvlHistory(db: Db, chain: string, pool: string): TvlHistory {
     let amount = 0n;
     try {
       const data = JSON.parse(r.data_json) as string[];
-      const isDep = normalizeHex(r.topic0) === DEP;
-      amount = BigInt(data[isDep ? 0 : 3] ?? "0x0");
-      net.set(tok, (net.get(tok) ?? 0n) + (isDep ? amount : -amount));
+      const isOut = normalizeHex(r.topic0) === WD;
+      amount = BigInt(data[isOut ? 3 : 0] ?? "0x0");
+      net.set(tok, (net.get(tok) ?? 0n) + (isOut ? -amount : amount));
     } catch {
       /* malformed row — skip */
     }
