@@ -34,6 +34,7 @@ import { currentTvl } from "./aggregations/tvl.js";
 import { activeProtocols, topCallers } from "./aggregations/protocols.js";
 import { windowStats, windowConversions } from "./aggregations/window.js";
 import { lifetimeConversions } from "./aggregations/lifetime-conversions.js";
+import { tvlHistory } from "./aggregations/tvl-history.js";
 import { lifetimeVolume } from "./aggregations/lifetime-volume.js";
 import { lifetimeRevenue } from "./aggregations/lifetime-revenue.js";
 import {
@@ -118,6 +119,16 @@ export function createHandlers(deps: HandlerDeps) {
       if (cached) return cached;
       const result = lifetimeConversions(db, chain, pool);
       views.put(key, result, 60_000);
+      return result;
+    },
+
+    /** Daily TVL series from event flows at current prices. Cached 5m. */
+    async tvlHistory() {
+      const key = `tvl-history:${chain}:${pool}`;
+      const cached = views.get<unknown>(key);
+      if (cached) return cached;
+      const result = tvlHistory(db, chain, pool);
+      views.put(key, result, 5 * 60_000);
       return result;
     },
 
