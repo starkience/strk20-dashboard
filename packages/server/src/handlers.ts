@@ -32,7 +32,7 @@ import {
 import { noteAgeBuckets } from "./aggregations/note-ages.js";
 import { currentTvl } from "./aggregations/tvl.js";
 import { activeProtocols, topCallers } from "./aggregations/protocols.js";
-import { windowStats } from "./aggregations/window.js";
+import { windowStats, windowConversions } from "./aggregations/window.js";
 import { lifetimeVolume } from "./aggregations/lifetime-volume.js";
 import { lifetimeRevenue } from "./aggregations/lifetime-revenue.js";
 import {
@@ -115,10 +115,15 @@ export function createHandlers(deps: HandlerDeps) {
       const cached = views.get<unknown>(key);
       if (cached) return cached;
       const w = windowStats(db, chain, pool, Date.now() - window);
+      const conv = windowConversions(db, chain, pool, Date.now() - window);
       const result = {
         windowMs: window,
         deposits: w.deposits,
         withdrawals: w.withdrawals,
+        // In-pool conversions (cross-token round-trip txs): see
+        // windowConversions for the footprint heuristic + caveats.
+        swaps: conv.swaps,
+        stakes: conv.stakes,
       };
       views.put(key, result, 30_000);
       return result;
