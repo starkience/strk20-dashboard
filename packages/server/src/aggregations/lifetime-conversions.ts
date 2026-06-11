@@ -44,15 +44,20 @@ export function lifetimeConversions(
   chain: string,
   pool: string
 ): LifetimeConversions {
-  const DEP = normalizeHex(EVENT_SELECTORS.Deposit);
   const WD = normalizeHex(EVENT_SELECTORS.Withdrawal);
 
+  // Inflows are Deposit OR OpenNoteDeposited (private-swap settlement
+  // path: the executor funds an open note; token in topic2 for both).
   const rows = db
     .prepare(
       `SELECT tx_hash, topic0, topic2, data_json FROM raw_events
-       WHERE chain=? AND contract=? AND topic0 IN (?, ?)`
+       WHERE chain=? AND contract=? AND topic0 IN (?, ?, ?)`
     )
-    .all(chain, pool, EVENT_SELECTORS.Deposit, EVENT_SELECTORS.Withdrawal) as {
+    .all(
+      chain, pool,
+      EVENT_SELECTORS.Deposit, EVENT_SELECTORS.OpenNoteDeposited,
+      EVENT_SELECTORS.Withdrawal
+    ) as {
     tx_hash: string;
     topic0: string;
     topic2: string | null;
@@ -73,7 +78,7 @@ export function lifetimeConversions(
       byTx.set(r.tx_hash, e);
     }
     const tok = normalizeHex(r.topic2);
-    if (normalizeHex(r.topic0) === DEP) {
+    if (normalizeHex(r.topic0) !== WD) {
       e.ins.add(tok);
     } else {
       e.outs.add(tok);

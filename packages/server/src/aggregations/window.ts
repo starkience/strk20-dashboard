@@ -63,25 +63,30 @@ export function windowConversions(
   sinceMs: number
 ): WindowConversions {
   const sinceIso = new Date(sinceMs).toISOString();
+  // Inflow side is Deposit OR OpenNoteDeposited: private swaps settle
+  // their output into the pool through deposit_to_open_note (the AVNU
+  // executor funds an open note for the user), which emits
+  // OpenNoteDeposited — token in topic2, same as Deposit.
   const rows = db
     .prepare(
       `SELECT tx_hash, topic0, topic2 FROM raw_events
-       WHERE chain=? AND contract=? AND topic0 IN (?, ?) AND timestamp_iso >= ?`
+       WHERE chain=? AND contract=? AND topic0 IN (?, ?, ?) AND timestamp_iso >= ?`
     )
     .all(
       chain, pool,
-      EVENT_SELECTORS.Deposit, EVENT_SELECTORS.Withdrawal, sinceIso
+      EVENT_SELECTORS.Deposit, EVENT_SELECTORS.OpenNoteDeposited,
+      EVENT_SELECTORS.Withdrawal, sinceIso
     ) as { tx_hash: string; topic0: string; topic2: string | null }[];
 
-  const DEP = normalizeHex(EVENT_SELECTORS.Deposit);
+  const WD = normalizeHex(EVENT_SELECTORS.Withdrawal);
   const byTx = new Map<string, { outs: Set<string>; ins: Set<string> }>();
   for (const r of rows) {
     if (!r.topic2) continue;
     let e = byTx.get(r.tx_hash);
     if (!e) { e = { outs: new Set(), ins: new Set() }; byTx.set(r.tx_hash, e); }
     const tok = normalizeHex(r.topic2);
-    if (normalizeHex(r.topic0) === DEP) e.ins.add(tok);
-    else e.outs.add(tok);
+    if (normalizeHex(r.topic0) === WD) e.outs.add(tok);
+    else e.ins.add(tok);
   }
 
   let swaps = 0;
