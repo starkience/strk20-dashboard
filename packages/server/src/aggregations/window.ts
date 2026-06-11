@@ -37,8 +37,10 @@ export function windowStats(
 export interface WindowConversions {
   /** Cross-token round-trips that are genuine trades. */
   swaps: number;
-  /** Cross-token round-trips into/out of a staked wrapper (xSTRK, vUSDC…). */
+  /** Round-trips into/out of liquid-staking receipts (xSTRK, xstrkBTC…). */
   stakes: number;
+  /** Round-trips into/out of lending receipts (vUSDC, vETH, pUSDC…). */
+  lends: number;
 }
 
 /**
@@ -82,28 +84,73 @@ export function windowConversions(
     else e.outs.add(tok);
   }
 
-  const WRAP_PREFIXES = ["x", "v", "p"];
-  const isWrapPair = (a: string, b: string): boolean => {
-    const sa = lookupToken(a)?.symbol;
-    const sb = lookupToken(b)?.symbol;
-    if (!sa || !sb) return false;
-    return WRAP_PREFIXES.some((p) => sb === p + sa || sa === p + sb);
-  };
-
   let swaps = 0;
   let stakes = 0;
+  let lends = 0;
   for (const { outs, ins } of byTx.values()) {
-    if (outs.size === 0 || ins.size === 0) continue;
-    // Cross pairs: tokens that came in but did not go out (and vice
-    // versa) — ignores same-token change notes.
-    const crossIns = [...ins].filter((t) => !outs.has(t));
-    const crossOuts = [...outs].filter((t) => !ins.has(t));
-    if (crossIns.length === 0 || crossOuts.length === 0) continue;
-    const allWrap = crossIns.every((i) => crossOuts.some((o) => isWrapPair(o, i)));
-    if (allWrap) stakes += 1;
-    else swaps += 1;
+    const kind = classifyRoundTrip(outs, ins);
+    if (kind === "swap") swaps += 1;
+    else if (kind === "stake") stakes += 1;
+    else if (kind === "lend") lends += 1;
   }
-  return { swaps, stakes };
+  return { swaps, stakes, lends };
+}
+
+/**
+ * Wrapper conventions: x-prefix = liquid staking (xSTRK, xstrkBTC,
+ * xWBTC → Endur), v/p-prefix = lending supply receipts (vUSDC, vETH →
+ * Vesu; pUSDC). Checked both directions so unwinds count in the same
+ * bucket as entries.
+ */
+function wrapKind(a: string, b: string): "stake" | "lend" | null {
+  const sa = lookupToken(a)?.symbol;
+  const sb = lookupToken(b)?.symbol;
+  if (!sa || !sb) return null;
+  if (sb === "x" + sa || sa === "x" + sb) return "stake";
+  if (sb === "v" + sa || sa === "v" + sb) return "lend";
+  if (sb === "p" + sa || sa === "p" + sb) return "lend";
+  return null;
+}
+
+/**
+ * Classify one round-trip tx by its cross-token pairs (tokens that came
+ * in but didn't go out, and vice versa — same-token change notes are
+ * ignored). All pairs wrapping into staking receipts → stake; into
+ * lending receipts → lend; anything else cross-token → swap.
+ */
+export function classifyRoundTrip(
+  outs: Set<string>,
+  ins: Set<string>
+): "swap" | "stake" | "lend" | null {
+  if (outs.size === 0 || ins.size === 0) return null;
+  // Tokens that newly appeared / fully disappeared. A token on both
+  // sides is change (partial spend) and classifies nothing by itself —
+  // but it still counts as a wrap-source/destination for the tokens
+  // that did cross (out USDC → in STRK + leftover USDC is a swap).
+  const crossIns = [...ins].filter((t) => !outs.has(t));
+  const crossOuts = [...outs].filter((t) => !ins.has(t));
+  if (crossIns.length === 0 && crossOuts.length === 0) return null;
+  const kinds: ("swap" | "stake" | "lend")[] = [];
+  for (const i of crossIns) {
+    let k: "swap" | "stake" | "lend" = "swap";
+    for (const o of outs) {
+      const w = wrapKind(o, i);
+      if (w) { k = w; break; }
+    }
+    kinds.push(k);
+  }
+  for (const o of crossOuts) {
+    if (crossIns.length > 0) break; // already classified by what came in
+    let k: "swap" | "stake" | "lend" = "swap";
+    for (const i of ins) {
+      const w = wrapKind(o, i);
+      if (w) { k = w; break; }
+    }
+    kinds.push(k);
+  }
+  if (kinds.every((k) => k === "stake")) return "stake";
+  if (kinds.every((k) => k === "lend")) return "lend";
+  return "swap";
 }
 
 /** Sum USD value of an event type's amounts since a cutoff. `amountIndex` is

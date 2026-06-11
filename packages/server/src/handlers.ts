@@ -33,6 +33,7 @@ import { noteAgeBuckets } from "./aggregations/note-ages.js";
 import { currentTvl } from "./aggregations/tvl.js";
 import { activeProtocols, topCallers } from "./aggregations/protocols.js";
 import { windowStats, windowConversions } from "./aggregations/window.js";
+import { lifetimeConversions } from "./aggregations/lifetime-conversions.js";
 import { lifetimeVolume } from "./aggregations/lifetime-volume.js";
 import { lifetimeRevenue } from "./aggregations/lifetime-revenue.js";
 import {
@@ -109,6 +110,17 @@ export function createHandlers(deps: HandlerDeps) {
      * the dashboard fans this out as the live portion of "Most frequent
      * activities" for a 30D window. Cached 30s per window.
      */
+    /** All-time swap/stake/lend volumes + private-transfer count.
+     *  Cached 60s — full event scan per compute. */
+    async lifetimeConversions() {
+      const key = `lifetime-conversions:${chain}:${pool}`;
+      const cached = views.get<unknown>(key);
+      if (cached) return cached;
+      const result = lifetimeConversions(db, chain, pool);
+      views.put(key, result, 60_000);
+      return result;
+    },
+
     async windowOps(opts: { windowMs?: number } = {}) {
       const window = opts.windowMs ?? DAY_MS;
       const key = `window-ops:${chain}:${pool}:${window}`;
@@ -124,6 +136,7 @@ export function createHandlers(deps: HandlerDeps) {
         // windowConversions for the footprint heuristic + caveats.
         swaps: conv.swaps,
         stakes: conv.stakes,
+        lends: conv.lends,
       };
       views.put(key, result, 30_000);
       return result;
