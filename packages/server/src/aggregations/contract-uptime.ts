@@ -1,6 +1,5 @@
-import { hash } from "starknet";
 import type { Db } from "../cache/db.js";
-import { normalizeHex } from "@strk20/core";
+import { OZ_SELECTORS, normalizeHex } from "@strk20/core";
 
 /**
  * Contract uptime since launch — the honest, on-chain-verifiable kind.
@@ -17,8 +16,8 @@ import { normalizeHex } from "@strk20/core";
  * reporting dev-laptop restarts as "downtime".)
  */
 
-const PAUSED = normalizeHex(hash.getSelectorFromName("Paused"));
-const UNPAUSED = normalizeHex(hash.getSelectorFromName("Unpaused"));
+const PAUSED = normalizeHex(OZ_SELECTORS.Paused);
+const UNPAUSED = normalizeHex(OZ_SELECTORS.Unpaused);
 
 export interface UptimeDay {
   date: string; // YYYY-MM-DD UTC

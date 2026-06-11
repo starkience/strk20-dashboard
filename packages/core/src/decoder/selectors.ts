@@ -31,6 +31,17 @@ export const EVENT_SELECTORS: Record<EventName, string> = Object.fromEntries(
   EVENT_NAMES.map((name) => [name, selectorOf(name)])
 ) as Record<EventName, string>;
 
+/**
+ * OpenZeppelin component events the pool can emit (PausableComponent).
+ * Exposed from core because core owns the starknet dependency — server
+ * code must not import 'starknet' directly (it isn't in the server's
+ * dependency tree; doing so crashed the container at boot).
+ */
+export const OZ_SELECTORS = {
+  Paused: selectorOf("Paused"),
+  Unpaused: selectorOf("Unpaused"),
+} as const;
+
 /** Reverse map: topic0 selector → event short name. */
 export const SELECTOR_TO_NAME: Record<string, EventName> = Object.fromEntries(
   Object.entries(EVENT_SELECTORS).map(([name, selector]) => [
