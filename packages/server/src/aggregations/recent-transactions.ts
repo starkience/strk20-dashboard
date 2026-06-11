@@ -199,7 +199,10 @@ function conversionEntry(
     txHash: first.tx_hash,
     blockNumber: first.block_number,
     timestampIso: first.timestamp_iso,
-    kind: kind === "swap" ? "Swap" : kind === "stake" ? "Stake" : "Lend",
+    // Lending entries deferred per direction (2026-06-11): the feed
+    // shows them as plain swaps for now; lifetime-conversions still
+    // tracks them as lends.
+    kind: kind === "stake" ? "Stake" : "Swap",
     ...outLeg,
     peer: firstWd ? buildPeer(firstWd.topic1 ?? "0x0") : null,
     inLeg,
