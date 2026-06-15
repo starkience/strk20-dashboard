@@ -15,6 +15,7 @@ import { openCache, EventCache, ViewCache } from "./cache/index.js";
 import { HeartbeatCache } from "./cache/heartbeats.js";
 import { createHandlers } from "./handlers.js";
 import { startTokenSync } from "./services/token-sync.js";
+import { startVenueVerify } from "./services/venue-verify.js";
 
 const BASE_URL = required("STARKSCAN_BASE_URL");
 const API_KEY = required("STARKSCAN_API_KEY");
@@ -67,6 +68,12 @@ app.get("/agg/lifetime-volume", async (c) => c.json(await h.lifetimeVolume()));
 app.get("/agg/lifetime-revenue", async (c) => c.json(await h.lifetimeRevenue()));
 app.get("/agg/lifetime-conversions", async (c) => c.json(await h.lifetimeConversions()));
 app.get("/agg/tvl-history", async (c) => c.json(await h.tvlHistory()));
+app.get("/agg/shielded-balance", async (c) => c.json(await h.shieldedBalance()));
+app.get("/agg/routed-volume", async (c) => c.json(await h.routedVolume()));
+app.get("/agg/swap-by-token", async (c) => c.json(await h.swapVolumeByToken()));
+app.get("/agg/actions-by-protocol", async (c) => c.json(await h.actionsByProtocol()));
+app.get("/agg/transactions", async (c) => c.json(await h.transactionsPerDay()));
+app.get("/agg/volume-history", async (c) => c.json(await h.volumeHistory()));
 app.get("/agg/relayer-concentration", async (c) => c.json(await h.relayerConcentration()));
 app.get("/agg/contract-uptime", async (c) => c.json(await h.contractUptime()));
 app.get("/agg/uptime-history", async (c) => {
@@ -149,6 +156,11 @@ runAutoSync().catch((e) => console.error("auto-sync failed:", e));
 
 // Token discovery + live USD pricing (Starkscan metadata, CoinGecko prices).
 startTokenSync({ db, starkscan, chain: CHAIN, pool: POOL });
+
+// Venue verification: one receipt fetch per round-trip tx upgrades
+// inferred swaps to venue-confirmed swaps with venue-reported amounts.
+const RPC_URL = process.env.STARKNET_RPC_URL ?? "https://rpc.starknet.lava.build";
+startVenueVerify({ db, chain: CHAIN, pool: POOL, rpcUrl: RPC_URL });
 
 function required(key: string): string {
   const v = process.env[key];

@@ -6,6 +6,7 @@ import {
   normalizeHex,
 } from "@strk20/core";
 import { countByTopicSinceIso } from "./_helpers.js";
+import { verifiedSwapsByTx } from "./venue-swaps.js";
 
 export interface WindowStats {
   deposits: number;
@@ -49,10 +50,13 @@ export interface WindowConversions {
  * In-pool conversions in a trailing window. The observable footprint of
  * a private swap is one transaction containing BOTH a Withdrawal of
  * token A and a Deposit of token B (out to the venue, back into the
- * pool as something else). Round-trips where the destination token is
- * a staked/wrapped derivative of the source (strkBTC→xstrkBTC,
- * STRK→xSTRK, USDC→vUSDC — prefix convention x/v/p, both directions)
- * are counted as staking instead of swaps.
+ * pool as something else). A round-trip counts as a SWAP only when the
+ * venue's own swap event is present in its receipt (venue-verified —
+ * see services/venue-verify.ts and core protocols/venues.ts for the
+ * methodology and a worked example tx). Round-trips where the
+ * destination token is a staked/wrapped derivative of the source
+ * (strkBTC→xstrkBTC, STRK→xSTRK, USDC→vUSDC — prefix convention x/v/p,
+ * both directions) are counted as staking/lending by symbol convention.
  *
  * This is a floor, not a census: a swap deliberately split across two
  * transactions, or a same-token round-trip, leaves no countable
@@ -91,14 +95,20 @@ export function windowConversions(
     else e.ins.add(tok);
   }
 
+  // Swaps require venue verification (the venue's own swap event in the
+  // tx receipt — see services/venue-verify.ts); stake/lend keep the
+  // wrapper-symbol classification below.
+  const verified = verifiedSwapsByTx(db, chain);
   let swaps = 0;
   let stakes = 0;
   let lends = 0;
-  for (const { outs, ins } of byTx.values()) {
+  for (const [txHash, { outs, ins }] of byTx) {
+    // Wrap conventions outrank the venue event: a wrap routed via AVNU
+    // emits a Swap event too, but the user's intent is staking/lending.
     const kind = classifyRoundTrip(outs, ins);
-    if (kind === "swap") swaps += 1;
-    else if (kind === "stake") stakes += 1;
+    if (kind === "stake") stakes += 1;
     else if (kind === "lend") lends += 1;
+    else if (verified.has(txHash)) swaps += 1;
   }
   return { swaps, stakes, lends };
 }

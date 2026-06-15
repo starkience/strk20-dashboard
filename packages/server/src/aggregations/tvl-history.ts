@@ -28,6 +28,11 @@ export interface TvlHistoryPoint {
    *  current STRK price (fee-paying tx count × current fee — same
    *  method as lifetime-revenue, so the two always agree). */
   feesUsd: number;
+  /** Size of the anonymity set (unspent notes = EncNoteCreated −
+   *  NoteUsed) at the end of this day — same definition as the live
+   *  anonymitySetUnspent, snapshotted daily. Grows on shielding, shrinks
+   *  when a note is spent. */
+  anonSet: number;
 }
 
 export interface TvlHistory {
@@ -61,6 +66,25 @@ function dailyFeeTxCounts(db: Db, chain: string, pool: string): Map<string, numb
     )
     .all(chain, pool, feeSet.block_number, feeSet.tx_hash) as { day: string }[];
   for (const r of rows) out.set(r.day, (out.get(r.day) ?? 0) + 1);
+  return out;
+}
+
+/** Per-day change in the anonymity set: EncNoteCreated (shielded) minus
+ *  NoteUsed (spent) per UTC day. Accumulated into the running set size. */
+function dailyNoteDeltas(db: Db, chain: string, pool: string): Map<string, number> {
+  const byDay = (topic: string, sign: number, out: Map<string, number>) => {
+    const rows = db
+      .prepare(
+        `SELECT substr(timestamp_iso, 1, 10) AS day, COUNT(*) AS n FROM raw_events
+         WHERE chain=? AND contract=? AND topic0=?
+         GROUP BY day`
+      )
+      .all(chain, pool, topic) as { day: string; n: number }[];
+    for (const r of rows) out.set(r.day, (out.get(r.day) ?? 0) + sign * r.n);
+  };
+  const out = new Map<string, number>();
+  byDay(EVENT_SELECTORS.EncNoteCreated, 1, out);
+  byDay(EVENT_SELECTORS.NoteUsed, -1, out);
   return out;
 }
 
@@ -131,13 +155,20 @@ export function tvlHistory(db: Db, chain: string, pool: string): TvlHistory {
     return cumFeeTxs * feeStrk * strkPrice;
   };
 
+  const noteDeltaByDay = dailyNoteDeltas(db, chain, pool);
+  let cumAnon = 0;
+  const anonAt = (day: string): number => {
+    cumAnon += noteDeltaByDay.get(day) ?? 0;
+    return Math.max(0, cumAnon);
+  };
+
   let curDay = rows[0]!.day;
   for (const r of rows) {
     if (!r.topic2) continue;
     // Day rolled over: snapshot the balance for every day in between so
     // quiet days still get a (flat) point and the x-axis stays linear.
     while (r.day > curDay) {
-      days.push({ date: curDay, tvlUsd: valueNow(), feesUsd: feesAt(curDay) });
+      days.push({ date: curDay, tvlUsd: valueNow(), feesUsd: feesAt(curDay), anonSet: anonAt(curDay) });
       curDay = nextDay(curDay);
     }
     const tok = normalizeHex(r.topic2);
@@ -155,7 +186,7 @@ export function tvlHistory(db: Db, chain: string, pool: string): TvlHistory {
   // today so the chart's right edge is "now".
   const today = new Date().toISOString().slice(0, 10);
   while (curDay <= today) {
-    days.push({ date: curDay, tvlUsd: valueNow(), feesUsd: feesAt(curDay) });
+    days.push({ date: curDay, tvlUsd: valueNow(), feesUsd: feesAt(curDay), anonSet: anonAt(curDay) });
     curDay = nextDay(curDay);
   }
 

@@ -57,6 +57,36 @@ CREATE TABLE IF NOT EXISTS token_prices (
   updated_at  INTEGER NOT NULL
 );
 
+-- Receipt-verification bookkeeping: every round-trip candidate tx gets
+-- exactly one receipt fetch (receipts are immutable), recorded here so
+-- the venue-verify service never refetches.
+CREATE TABLE IF NOT EXISTS tx_venue_checks (
+  chain        TEXT NOT NULL,
+  tx_hash      TEXT NOT NULL,
+  checked_at   INTEGER NOT NULL,
+  swaps_found  INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (chain, tx_hash)
+);
+
+-- Venue-emitted swaps decoded from those receipts (AVNU Swap events,
+-- Ekubo Swapped presence). Amounts are raw integer strings; null amount
+-- columns mean the venue event was seen but its ABI isn't decoded.
+CREATE TABLE IF NOT EXISTS venue_swaps (
+  chain        TEXT NOT NULL,
+  tx_hash      TEXT NOT NULL,
+  evt_index    INTEGER NOT NULL,
+  day          TEXT NOT NULL,
+  venue        TEXT NOT NULL,
+  sell_token   TEXT,
+  sell_amount  TEXT,
+  buy_token    TEXT,
+  buy_amount   TEXT,
+  PRIMARY KEY (chain, tx_hash, evt_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_venue_swaps_day
+  ON venue_swaps(chain, day);
+
 CREATE TABLE IF NOT EXISTS view_cache (
   key         TEXT PRIMARY KEY,
   value_json  TEXT NOT NULL,

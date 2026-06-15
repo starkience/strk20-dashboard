@@ -6,6 +6,7 @@ import {
   normalizeHex,
 } from "@strk20/core";
 import { classifyRoundTrip } from "./window.js";
+import { verifiedSwapsByTx } from "./venue-swaps.js";
 
 /**
  * All-time in-pool activity derived from event footprints, powering the
@@ -105,17 +106,24 @@ export function lifetimeConversions(
     lendVolumeUsd: 0,
     privateTransfers: 0,
   };
-  for (const { outs, ins, outUsd } of byTx.values()) {
+  // Swaps require venue verification: the venue's own swap event in the
+  // tx receipt, valued at venue-reported amounts where priced (see
+  // services/venue-verify.ts; methodology in core protocols/venues.ts).
+  const verified = verifiedSwapsByTx(db, chain);
+  for (const [txHash, { outs, ins, outUsd }] of byTx) {
+    // Wrap conventions outrank the venue event: a wrap routed via AVNU
+    // emits a Swap event too, but the user's intent is staking/lending.
     const kind = classifyRoundTrip(outs, ins);
-    if (kind === "swap") {
-      out.swapCount += 1;
-      out.swapVolumeUsd += outUsd;
-    } else if (kind === "stake") {
+    const v = verified.get(txHash);
+    if (kind === "stake") {
       out.stakeCount += 1;
       out.stakeVolumeUsd += outUsd;
     } else if (kind === "lend") {
       out.lendCount += 1;
       out.lendVolumeUsd += outUsd;
+    } else if (v) {
+      out.swapCount += 1;
+      out.swapVolumeUsd += v.usd ?? outUsd;
     }
   }
 
