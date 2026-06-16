@@ -55,6 +55,29 @@ import { contractUptime } from "./aggregations/contract-uptime.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+// If the sync loop hasn't completed a poll in this long, the data is stale.
+// The poll runs every ~2m, so 10m = ~5 missed polls — comfortably past jitter,
+// tight enough to catch a wedged indexer fast (the 20h-freeze failure mode).
+const STALE_AFTER_MS = 10 * 60_000;
+// A live head this far ahead of our cached head also signals trouble even if
+// the loop is "succeeding" (e.g. Starkscan itself stopped indexing).
+const STALE_LAG_BLOCKS = 600;
+
+export interface Freshness {
+  /** Wall-clock ms of the last successful sync poll. */
+  lastSyncAt: number | null;
+  /** Seconds since the last successful sync poll. */
+  lastSyncAgeSeconds: number | null;
+  /** ISO timestamp of the newest event we hold ("data as of"). */
+  lastEventAt: string | null;
+  /** Highest block number present in the cache. */
+  cachedHeadBlock: number | null;
+  /** Whether the full-history backfill has finished. */
+  backfillComplete: boolean;
+  /** True when the data should be treated as stale (drives a UI banner). */
+  stale: boolean;
+}
+
 export interface HandlerDeps {
   db: Db;
   events: EventCache;
@@ -70,35 +93,80 @@ export function createHandlers(deps: HandlerDeps) {
   const tokenMeta = new TokenMetaCache(db);
   const avnu = new AvnuTokenIndex();
 
+  /**
+   * Data-freshness signal — the thing that was missing when the live feed
+   * silently froze for 20h. Derived from the sync_state row's updated_at
+   * (loop liveness) and the newest cached event. Cheap; no external calls.
+   */
+  function freshness(): Freshness {
+    const sync = events.readSyncState(chain, pool);
+    const lastSyncAt = sync?.updatedAt ?? null;
+    const ageMs = lastSyncAt != null ? Date.now() - lastSyncAt : null;
+    return {
+      lastSyncAt,
+      lastSyncAgeSeconds: ageMs != null ? Math.round(ageMs / 1000) : null,
+      lastEventAt: events.newestEventIso(chain, pool),
+      cachedHeadBlock: events.latestBlock(chain, pool),
+      backfillComplete: sync?.backfillComplete ?? false,
+      stale: ageMs == null || ageMs > STALE_AFTER_MS,
+    };
+  }
+
   return {
-    /** Liveness + sync state. */
+    /** Liveness + sync state + data freshness. */
     async health() {
+      const f = freshness();
       return {
         ok: true,
         service: "strk20-dashboard-api",
         chain,
         pool,
-        cachedEvents: events.latestBlock(chain, pool),
+        cachedEvents: f.cachedHeadBlock,
+        freshness: f,
         rateLimit: starkscan.getRateLimitState(),
       };
     },
 
-    /** Chain status (head block, indexer lag). Cached 5s. */
+    /**
+     * Chain status (head block, indexer lag) merged with our own sync
+     * freshness, so a single call reveals whether the indexer is keeping up.
+     * Starkscan's status is cached 5s; if it's unreachable we still return our
+     * local freshness rather than throwing.
+     */
     async status() {
       const key = `status:${chain}`;
-      const cached = views.get<unknown>(key);
-      if (cached) return { ...(cached as object), _cached: true };
-      const fresh = await starkscan.status();
-      views.put(key, fresh, 5_000);
-      return fresh;
+      type Status = Awaited<ReturnType<typeof starkscan.status>>;
+      let chainStatus = views.get<Status>(key);
+      const wasCached = chainStatus != null;
+      if (!chainStatus) {
+        try {
+          chainStatus = await starkscan.status();
+          views.put(key, chainStatus, 5_000);
+        } catch {
+          chainStatus = null; // upstream down — fall back to local freshness only
+        }
+      }
+      const f = freshness();
+      const headLagBlocks =
+        chainStatus?.headBlockNumber != null && f.cachedHeadBlock != null
+          ? chainStatus.headBlockNumber - f.cachedHeadBlock
+          : null;
+      return {
+        ...(chainStatus ?? {}),
+        _cached: wasCached,
+        chainStatusAvailable: chainStatus != null,
+        cachedHeadBlock: f.cachedHeadBlock,
+        headLagBlocks,
+        lastSyncAt: f.lastSyncAt,
+        lastSyncAgeSeconds: f.lastSyncAgeSeconds,
+        lastEventAt: f.lastEventAt,
+        stale: f.stale || (headLagBlocks != null && headLagBlocks > STALE_LAG_BLOCKS),
+      };
     },
 
     /** Incremental sync of pool events into the cache. */
     async sync(opts: { pageSize?: number; maxPages?: number } = {}) {
-      return syncContractEvents(starkscan, events, chain, pool, {
-        pageSize: opts.pageSize ?? 200,
-        maxPages: opts.maxPages ?? 50,
-      });
+      return syncContractEvents(starkscan, events, chain, pool, opts);
     },
 
     /** Anonymity set (created notes − spent notes). */
@@ -253,6 +321,7 @@ export function createHandlers(deps: HandlerDeps) {
       const depositors = distinctDepositorsAllTime(db, chain, pool);
       const anon = anonymitySet(db, chain, pool);
       const w = windowStats(db, chain, pool, Date.now() - DAY_MS);
+      const f = freshness();
       return {
         tvlUsd: tvl.totalUsd,
         depositCount: tvl.depositCount,
@@ -264,6 +333,10 @@ export function createHandlers(deps: HandlerDeps) {
         deposits24h: w.deposits,
         withdrawals24h: w.withdrawals,
         tvlChangeUsd24h: w.tvlChangeUsd,
+        // Freshness so the centerpiece fetch alone can drive a "data stale" banner.
+        dataAsOf: f.lastEventAt,
+        lastSyncAgeSeconds: f.lastSyncAgeSeconds,
+        stale: f.stale,
       };
     },
 

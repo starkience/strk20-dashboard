@@ -126,21 +126,29 @@ serve({ fetch: app.fetch, port: PORT, hostname: "0.0.0.0" }, (info) => {
 const SYNC_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS ?? 120_000);
 const BACKFILL_ON_START = process.env.BACKFILL_ON_START !== "false";
 
-async function runAutoSync() {
-  if (BACKFILL_ON_START) {
-    console.log("sync: backfilling history…");
-    for (let pass = 1; ; pass++) {
-      const r = await h.sync({ maxPages: 50 });
-      console.log(
-        `sync[${r.phase}] pass ${pass}: +${r.eventsInserted} (head ${r.lastBlock ?? "—"})`
-      );
-      if (r.backfillComplete || r.eventsInserted === 0) break;
-    }
-    console.log("sync: backfill complete");
+// Single-flight guard: the boot backfill and the interval poll share one sync
+// path that mutates the cursor in sync_state, so they must never run
+// concurrently. A skipped tick is harmless — the next one catches up.
+let syncInFlight = false;
+async function runSyncOnce() {
+  if (syncInFlight) return null;
+  syncInFlight = true;
+  try {
+    return await h.sync();
+  } finally {
+    syncInFlight = false;
   }
+}
+
+async function runAutoSync() {
+  // Register the periodic poll FIRST so that even if the boot backfill throws,
+  // catch-up (and its heartbeats) still run for the life of the process. The
+  // old ordering put this after the backfill loop, so a single backfill error
+  // killed sync permanently and silently.
   setInterval(async () => {
     try {
-      const r = await h.sync({ maxPages: 50 });
+      const r = await runSyncOnce();
+      if (!r) return; // a sync was already in flight
       heartbeats.record(true, r.eventsInserted);
       if (r.eventsInserted > 0) {
         console.log(`sync[${r.phase}]: +${r.eventsInserted} (head ${r.lastBlock ?? "—"})`);
@@ -150,6 +158,27 @@ async function runAutoSync() {
       console.error("sync error:", (e as Error).message);
     }
   }, SYNC_INTERVAL_MS);
+
+  if (!BACKFILL_ON_START) return;
+  console.log("sync: backfilling history…");
+  for (let pass = 1; ; pass++) {
+    try {
+      const r = await runSyncOnce();
+      if (!r) break; // interval poll is running it; let that drive completion
+      heartbeats.record(true, r.eventsInserted);
+      console.log(
+        `sync[${r.phase}] pass ${pass}: +${r.eventsInserted} (head ${r.lastBlock ?? "—"})`
+      );
+      if (r.backfillComplete || r.eventsInserted === 0) break;
+    } catch (e) {
+      // Bail out of the boot backfill but leave the interval running — it will
+      // keep retrying from the persisted cursor.
+      heartbeats.record(false, 0, (e as Error).message);
+      console.error(`sync: backfill pass ${pass} failed:`, (e as Error).message);
+      break;
+    }
+  }
+  console.log("sync: backfill complete");
 }
 
 runAutoSync().catch((e) => console.error("auto-sync failed:", e));

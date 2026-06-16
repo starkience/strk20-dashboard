@@ -12,8 +12,14 @@ export interface StarkscanClientOptions {
   chain?: string;
   /** Soft cap below which we slow down. Defaults to 10% of the observed limit. */
   rateLimitFloor?: number;
-  /** Max retries on 429 / 5xx. */
+  /** Max retries on 429 / 5xx / network error. */
   maxRetries?: number;
+  /**
+   * Per-request timeout (ms). A hung connection is aborted after this and
+   * retried like a transient error, so a stalled upstream can't silently
+   * wedge the sync loop forever. Defaults to 15s.
+   */
+  requestTimeoutMs?: number;
   fetch?: typeof fetch;
 }
 
@@ -97,6 +103,7 @@ export class StarkscanClient {
   private readonly chain: string;
   private readonly rateLimitFloor: number;
   private readonly maxRetries: number;
+  private readonly requestTimeoutMs: number;
   private readonly fetchImpl: typeof fetch;
   private lastRateLimit: RateLimitState = {
     limit: null,
@@ -111,6 +118,7 @@ export class StarkscanClient {
     this.chain = opts.chain ?? DEFAULT_CHAIN;
     this.rateLimitFloor = opts.rateLimitFloor ?? 12; // ~10% of the 120/min light tier
     this.maxRetries = opts.maxRetries ?? 4;
+    this.requestTimeoutMs = opts.requestTimeoutMs ?? 15_000;
     this.fetchImpl = opts.fetch ?? fetch;
   }
 
@@ -209,13 +217,37 @@ export class StarkscanClient {
       // Soft slow-down when remaining is below the floor.
       await this.maybeSlowDown();
 
-      const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
-        method: "GET",
-        headers: {
-          "X-Starkscan-Api-Key": this.apiKey,
-          Accept: "application/json",
-        },
-      });
+      // Abort a hung request after requestTimeoutMs so a stalled connection
+      // can't block forever (the failure mode that froze the live feed).
+      let res: Response;
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), this.requestTimeoutMs);
+      try {
+        res = await this.fetchImpl(`${this.baseUrl}${path}`, {
+          method: "GET",
+          headers: {
+            "X-Starkscan-Api-Key": this.apiKey,
+            Accept: "application/json",
+          },
+          signal: ctrl.signal,
+        });
+      } catch (err) {
+        // No response at all — timeout abort or network failure. Treat as
+        // transient: retry with backoff, then surface as a StarkscanError
+        // (status 0) so the caller sees a real error instead of a hang.
+        if (attempt < this.maxRetries) {
+          await sleep(Math.min(8_000, 250 * 2 ** attempt));
+          attempt += 1;
+          continue;
+        }
+        const isAbort = (err as Error)?.name === "AbortError";
+        const msg = isAbort
+          ? `Starkscan request timed out after ${this.requestTimeoutMs}ms: ${path}`
+          : `Starkscan request failed: ${(err as Error)?.message ?? String(err)}`;
+        throw new StarkscanError(msg, 0, msg);
+      } finally {
+        clearTimeout(timer);
+      }
       this.recordRateLimit(res.headers);
 
       if (res.ok) {

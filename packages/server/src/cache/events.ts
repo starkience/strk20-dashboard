@@ -6,6 +6,7 @@ export class EventCache {
   private readonly countByTopicStmt: StatementSync;
   private readonly countSinceBlockStmt: StatementSync;
   private readonly latestBlockStmt: StatementSync;
+  private readonly newestEventStmt: StatementSync;
   private readonly upsertSyncStmt: StatementSync;
   private readonly readSyncStmt: StatementSync;
 
@@ -29,6 +30,11 @@ export class EventCache {
 
     this.latestBlockStmt = db.prepare(`
       SELECT MAX(block_number) as block FROM raw_events
+      WHERE chain = ? AND contract = ?
+    `);
+
+    this.newestEventStmt = db.prepare(`
+      SELECT MAX(timestamp_iso) as iso FROM raw_events
       WHERE chain = ? AND contract = ?
     `);
 
@@ -105,6 +111,14 @@ export class EventCache {
     return row?.block != null ? Number(row.block) : null;
   }
 
+  /** ISO timestamp of the newest event held in the cache (the "data as of"). */
+  newestEventIso(chain: string, contract: string): string | null {
+    const row = this.newestEventStmt.get(chain, contract) as
+      | { iso: string | null }
+      | undefined;
+    return row?.iso ?? null;
+  }
+
   recordSyncState(
     chain: string,
     contract: string,
@@ -129,12 +143,15 @@ export class EventCache {
     lastSyncedBlock: number | null;
     lastCursor: string | null;
     backfillComplete: boolean;
+    /** Wall-clock ms of the last successful sync poll (sync-loop liveness). */
+    updatedAt: number | null;
   } | null {
     const row = this.readSyncStmt.get(chain, contract) as
       | {
           last_synced_block: number | null;
           last_cursor: string | null;
           backfill_complete: number;
+          updated_at: number | null;
         }
       | undefined;
     if (!row) return null;
@@ -142,6 +159,7 @@ export class EventCache {
       lastSyncedBlock: row.last_synced_block != null ? Number(row.last_synced_block) : null,
       lastCursor: row.last_cursor,
       backfillComplete: Number(row.backfill_complete) === 1,
+      updatedAt: row.updated_at != null ? Number(row.updated_at) : null,
     };
   }
 }
