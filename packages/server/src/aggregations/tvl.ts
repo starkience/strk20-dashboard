@@ -12,6 +12,38 @@ import {
   type AvnuTokenIndex,
 } from "@strk20/core";
 import type { ViewCache, TokenMetaCache } from "../cache/index.js";
+import { tvlHistory } from "./tvl-history.js";
+
+// Balances are read straight from a Starknet RPC node (authoritative, and
+// independent of Starkscan's balance-of proxy, which has proven flaky and
+// returns 0 under load). Read order: RPC → Starkscan → event-derived TVL, so
+// the headline TVL is never $0 because of a read outage.
+const RPC_URL = process.env.STARKNET_RPC_URL || "https://rpc.starknet.lava.build";
+const BALANCE_OF_SELECTOR =
+  "0x02e4263afad30923c891518314c3c95dbe830a16874e8abc5777a9a20b54c76e";
+
+async function rpcBalanceOf(token: string, owner: string): Promise<string> {
+  const res = await fetch(RPC_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "starknet_call",
+      params: [
+        { contract_address: token, entry_point_selector: BALANCE_OF_SELECTOR, calldata: [owner] },
+        "latest",
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error(`rpc ${res.status}`);
+  const body = (await res.json()) as { result?: string[] };
+  const r = body.result;
+  if (!Array.isArray(r) || r.length === 0) throw new Error("empty balanceOf result");
+  const low = BigInt(r[0] ?? "0x0");
+  const high = r.length > 1 ? BigInt(r[1] ?? "0x0") : 0n; // u256 = (high << 128) | low
+  return ((high << 128n) | low).toString();
+}
 
 export interface TokenTvl {
   address: string;
@@ -34,6 +66,8 @@ export interface TokenTvl {
 
 export interface TvlSummary {
   totalUsd: number;
+  /** Where totalUsd came from: live on-chain balances, or the event-derived fallback. */
+  tvlSource: "onchain" | "events-fallback";
   depositCount: number;
   withdrawalCount: number;
   tokenCount: number;
@@ -77,10 +111,14 @@ export async function currentTvl(
 
     let balanceRaw = "0";
     try {
-      const res = await client.tokenBalanceOf(address, pool);
-      balanceRaw = res.balanceRaw ?? "0";
+      balanceRaw = await rpcBalanceOf(address, pool); // primary: direct RPC node
     } catch {
-      partial = true;
+      try {
+        const res = await client.tokenBalanceOf(address, pool); // fallback: Starkscan proxy
+        balanceRaw = res.balanceRaw ?? "0";
+      } catch {
+        partial = true;
+      }
     }
 
     const balanceHuman = applyDecimals(balanceRaw, meta.decimals);
@@ -114,8 +152,26 @@ export async function currentTvl(
   const depositCount = perToken.reduce((s, t) => s + t.depositCount, 0);
   const withdrawalCount = perToken.reduce((s, t) => s + t.withdrawalCount, 0);
 
+  // Safety net: if every balance read failed (RPC + Starkscan), never show $0 —
+  // fall back to the event-derived TVL (reconstructed from cached pool events;
+  // always available, no external calls). Keeps the headline robust to outages.
+  let tvlSource: TvlSummary["tvlSource"] = "onchain";
+  if (!(totalUsd > 0)) {
+    try {
+      const h = tvlHistory(db, chain, pool);
+      const last = h.days[h.days.length - 1];
+      if (last && last.tvlUsd > 0) {
+        totalUsd = last.tvlUsd;
+        tvlSource = "events-fallback";
+      }
+    } catch {
+      /* leave totalUsd as 0 */
+    }
+  }
+
   const summary: TvlSummary = {
     totalUsd,
+    tvlSource,
     depositCount,
     withdrawalCount,
     tokenCount: perToken.length,
