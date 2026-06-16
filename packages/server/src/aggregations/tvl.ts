@@ -14,35 +14,54 @@ import {
 import type { ViewCache, TokenMetaCache } from "../cache/index.js";
 import { tvlHistory } from "./tvl-history.js";
 
-// Balances are read straight from a Starknet RPC node (authoritative, and
-// independent of Starkscan's balance-of proxy, which has proven flaky and
-// returns 0 under load). Read order: RPC → Starkscan → event-derived TVL, so
-// the headline TVL is never $0 because of a read outage.
+// TVL balances: PRIMARY source is Starkscan's balance-of (production endpoint).
+// A Starknet RPC node (`rpcBalanceOf`) is the fallback AND a silent-zero guard —
+// Starkscan's balance proxy has been seen to return 0 for every token (the cause
+// of the $0-TVL incident), so a 0 from Starkscan on a token the pool actually
+// holds is re-checked on-chain. Both reads are time-bounded so a hung upstream
+// can't freeze the recompute; if everything fails the total falls back to the
+// event-derived TVL.
 const RPC_URL = process.env.STARKNET_RPC_URL || "https://rpc.starknet.lava.build";
 const BALANCE_OF_SELECTOR =
   "0x02e4263afad30923c891518314c3c95dbe830a16874e8abc5777a9a20b54c76e";
+const READ_TIMEOUT_MS = 6_000;
+
+/** Reject after `ms` so one hung balance read can't stall the per-token loop. */
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${label} timeout`)), ms)),
+  ]);
+}
 
 async function rpcBalanceOf(token: string, owner: string): Promise<string> {
-  const res = await fetch(RPC_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "starknet_call",
-      params: [
-        { contract_address: token, entry_point_selector: BALANCE_OF_SELECTOR, calldata: [owner] },
-        "latest",
-      ],
-    }),
-  });
-  if (!res.ok) throw new Error(`rpc ${res.status}`);
-  const body = (await res.json()) as { result?: string[] };
-  const r = body.result;
-  if (!Array.isArray(r) || r.length === 0) throw new Error("empty balanceOf result");
-  const low = BigInt(r[0] ?? "0x0");
-  const high = r.length > 1 ? BigInt(r[1] ?? "0x0") : 0n; // u256 = (high << 128) | low
-  return ((high << 128n) | low).toString();
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), READ_TIMEOUT_MS);
+  try {
+    const res = await fetch(RPC_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: ctrl.signal,
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "starknet_call",
+        params: [
+          { contract_address: token, entry_point_selector: BALANCE_OF_SELECTOR, calldata: [owner] },
+          "latest",
+        ],
+      }),
+    });
+    if (!res.ok) throw new Error(`rpc ${res.status}`);
+    const body = (await res.json()) as { result?: string[] };
+    const r = body.result;
+    if (!Array.isArray(r) || r.length === 0) throw new Error("empty balanceOf result");
+    const low = BigInt(r[0] ?? "0x0");
+    const high = r.length > 1 ? BigInt(r[1] ?? "0x0") : 0n; // u256 = (high << 128) | low
+    return ((high << 128n) | low).toString();
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 export interface TokenTvl {
@@ -108,24 +127,36 @@ export async function currentTvl(
 
   for (const address of tokens) {
     const meta = await resolveToken(address, avnu, client, tokenMeta);
+    const c = counts.get(address) ?? { depositCount: 0, withdrawalCount: 0 };
 
     let balanceRaw = "0";
     try {
-      balanceRaw = await rpcBalanceOf(address, pool); // primary: direct RPC node
+      // PRIMARY: Starkscan balance-of (production endpoint), per the data-source decision
+      const res = await withTimeout(
+        client.tokenBalanceOf(address, pool),
+        READ_TIMEOUT_MS,
+        "starkscan balanceOf",
+      );
+      balanceRaw = res.balanceRaw ?? "0";
     } catch {
+      // FALLBACK: read balanceOf straight from a Starknet RPC node
+      try { balanceRaw = await rpcBalanceOf(address, pool); } catch { partial = true; }
+    }
+    // GUARD against Starkscan's known silent-zero failure: if the pool has
+    // actually received this token but Starkscan reports 0, confirm on-chain
+    // via RPC before trusting the zero (prevents a recurrence of the $0 TVL).
+    if (balanceRaw === "0" && c.depositCount > 0) {
       try {
-        const res = await client.tokenBalanceOf(address, pool); // fallback: Starkscan proxy
-        balanceRaw = res.balanceRaw ?? "0";
+        const onchain = await rpcBalanceOf(address, pool);
+        if (onchain !== "0") balanceRaw = onchain;
       } catch {
-        partial = true;
+        /* keep 0 */
       }
     }
 
     const balanceHuman = applyDecimals(balanceRaw, meta.decimals);
     const balanceUsd = balanceHuman * meta.usdApprox;
     totalUsd += balanceUsd;
-
-    const c = counts.get(address) ?? { depositCount: 0, withdrawalCount: 0 };
     perToken.push({
       address,
       symbol: meta.symbol,
