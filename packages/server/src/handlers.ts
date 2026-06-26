@@ -29,6 +29,7 @@ import {
   activeDepositorsSince,
   distinctDepositorsAllTime,
 } from "./aggregations/depositors.js";
+import { registrationsPerDay } from "./aggregations/registrations.js";
 import { noteAgeBuckets } from "./aggregations/note-ages.js";
 import { currentTvl } from "./aggregations/tvl.js";
 import { activeProtocols, topCallers } from "./aggregations/protocols.js";
@@ -257,6 +258,17 @@ export function createHandlers(deps: HandlerDeps) {
       const cached = views.get<unknown>(key);
       if (cached) return cached;
       const result = transactionsPerDay(db, chain, pool);
+      views.put(key, result, 5 * 60_000);
+      return result;
+    },
+
+    /** User registrations per day (first ViewingKeySet per address), with
+     *  running user total. The pool's user-growth curve. Cached 5m. */
+    async registrations() {
+      const key = `registrations:${chain}:${pool}`;
+      const cached = views.get<unknown>(key);
+      if (cached) return cached;
+      const result = registrationsPerDay(db, chain, pool);
       views.put(key, result, 5 * 60_000);
       return result;
     },

@@ -73,6 +73,7 @@ app.get("/agg/routed-volume", async (c) => c.json(await h.routedVolume()));
 app.get("/agg/swap-by-token", async (c) => c.json(await h.swapVolumeByToken()));
 app.get("/agg/actions-by-protocol", async (c) => c.json(await h.actionsByProtocol()));
 app.get("/agg/transactions", async (c) => c.json(await h.transactionsPerDay()));
+app.get("/agg/registrations", async (c) => c.json(await h.registrations()));
 app.get("/agg/volume-history", async (c) => c.json(await h.volumeHistory()));
 app.get("/agg/relayer-concentration", async (c) => c.json(await h.relayerConcentration()));
 app.get("/agg/contract-uptime", async (c) => c.json(await h.contractUptime()));
