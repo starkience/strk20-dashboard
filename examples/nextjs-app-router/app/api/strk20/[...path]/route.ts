@@ -49,6 +49,7 @@ export async function GET(req: Request, { params }: Params) {
     case "/agg/active-depositors": return Response.json(await h.activeDepositors({
       windowMs: numQuery(url, "window_ms"),
     }));
+    case "/agg/active-users":    return Response.json(await h.activeUsersPerDay());
     case "/agg/distinct-depositors": return Response.json(await h.distinctDepositors());
     case "/agg/note-ages":       return Response.json(await h.noteAges());
     case "/agg/tvl":             return Response.json(await h.tvl());
