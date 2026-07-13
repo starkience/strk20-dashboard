@@ -16,6 +16,7 @@ import { HeartbeatCache } from "./cache/heartbeats.js";
 import { createHandlers } from "./handlers.js";
 import { startTokenSync } from "./services/token-sync.js";
 import { startVenueVerify } from "./services/venue-verify.js";
+import { startWalletClassify } from "./services/wallet-classify.js";
 
 const BASE_URL = required("STARKSCAN_BASE_URL");
 const API_KEY = required("STARKSCAN_API_KEY");
@@ -75,6 +76,7 @@ app.get("/agg/actions-by-protocol", async (c) => c.json(await h.actionsByProtoco
 app.get("/agg/transactions", async (c) => c.json(await h.transactionsPerDay()));
 app.get("/agg/registrations", async (c) => c.json(await h.registrations()));
 app.get("/agg/active-users", async (c) => c.json(await h.activeUsersPerDay()));
+app.get("/agg/wallet-families", async (c) => c.json(await h.walletFamilies()));
 app.get("/agg/volume-history", async (c) => c.json(await h.volumeHistory()));
 app.get("/agg/relayer-concentration", async (c) => c.json(await h.relayerConcentration()));
 app.get("/agg/contract-uptime", async (c) => c.json(await h.contractUptime()));
@@ -192,6 +194,10 @@ startTokenSync({ db, starkscan, chain: CHAIN, pool: POOL });
 // inferred swaps to venue-confirmed swaps with venue-reported amounts.
 const RPC_URL = process.env.STARKNET_RPC_URL ?? "https://rpc.starknet.lava.build";
 startVenueVerify({ db, chain: CHAIN, pool: POOL, rpcUrl: RPC_URL });
+
+// Wallet classification: one class-hash fetch per depositor address feeds
+// the /agg/wallet-families breakdown (activity by wallet software).
+startWalletClassify({ db, chain: CHAIN, pool: POOL, rpcUrl: RPC_URL });
 
 function required(key: string): string {
   const v = process.env[key];

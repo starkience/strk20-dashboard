@@ -87,6 +87,19 @@ CREATE TABLE IF NOT EXISTS venue_swaps (
 CREATE INDEX IF NOT EXISTS idx_venue_swaps_day
   ON venue_swaps(chain, day);
 
+-- Depositor wallet → account class hash (starknet_getClassHashAt), swept by
+-- the wallet-classify service. class_hash NULL = address not deployed (a
+-- deposit can name a counterfactual address). Class hashes only change on
+-- account upgrade, so one fetch per address is enough; re-sweeps only fill
+-- gaps.
+CREATE TABLE IF NOT EXISTS wallet_classes (
+  chain       TEXT NOT NULL,
+  address     TEXT NOT NULL,
+  class_hash  TEXT,
+  checked_at  INTEGER NOT NULL,
+  PRIMARY KEY (chain, address)
+);
+
 CREATE TABLE IF NOT EXISTS view_cache (
   key         TEXT PRIMARY KEY,
   value_json  TEXT NOT NULL,
