@@ -71,6 +71,13 @@ CREATE TABLE IF NOT EXISTS tx_venue_checks (
 -- Venue-emitted swaps decoded from those receipts (AVNU Swap events,
 -- Ekubo Swapped presence). Amounts are raw integer strings; null amount
 -- columns mean the venue event was seen but its ABI isn't decoded.
+--
+-- sell_usd / buy_usd freeze each leg's USD value at the moment the swap
+-- was RECORDED. Without them every read re-priced the whole history at
+-- today's spot, so a 30D volume figure drifted with token price even on
+-- zero-swap days (and was never comparable to venue-reported volume,
+-- which is priced at trade time). Null = the token had no price then;
+-- readers fall back to the current price so the row still counts.
 CREATE TABLE IF NOT EXISTS venue_swaps (
   chain        TEXT NOT NULL,
   tx_hash      TEXT NOT NULL,
@@ -81,6 +88,8 @@ CREATE TABLE IF NOT EXISTS venue_swaps (
   sell_amount  TEXT,
   buy_token    TEXT,
   buy_amount   TEXT,
+  sell_usd     REAL,
+  buy_usd      REAL,
   PRIMARY KEY (chain, tx_hash, evt_index)
 );
 
@@ -110,11 +119,31 @@ CREATE INDEX IF NOT EXISTS idx_view_cache_expires
   ON view_cache(expires_at);
 `;
 
+/**
+ * Columns added to tables that already exist in deployed databases.
+ * `CREATE TABLE IF NOT EXISTS` is a no-op there, so new columns need an
+ * explicit ALTER. Each entry is applied only when absent, making this
+ * safe to run on every boot.
+ */
+const ADDED_COLUMNS: { table: string; column: string; type: string }[] = [
+  { table: "venue_swaps", column: "sell_usd", type: "REAL" },
+  { table: "venue_swaps", column: "buy_usd", type: "REAL" },
+];
+
+function applyColumnMigrations(db: DatabaseSync): void {
+  for (const { table, column, type } of ADDED_COLUMNS) {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (cols.some((c) => c.name === column)) continue;
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
+}
+
 export function openCache(path: string): DatabaseSync {
   mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA synchronous = NORMAL;");
   db.exec(SCHEMA);
+  applyColumnMigrations(db);
   return db;
 }

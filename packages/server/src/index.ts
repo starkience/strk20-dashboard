@@ -17,6 +17,10 @@ import { createHandlers } from "./handlers.js";
 import { startTokenSync } from "./services/token-sync.js";
 import { startVenueVerify } from "./services/venue-verify.js";
 import { startWalletClassify } from "./services/wallet-classify.js";
+import {
+  backfillSwapPrices,
+  coingeckoDailyPrices,
+} from "./services/swap-price-backfill.js";
 
 const BASE_URL = required("STARKSCAN_BASE_URL");
 const API_KEY = required("STARKSCAN_API_KEY");
@@ -198,6 +202,31 @@ startVenueVerify({ db, chain: CHAIN, pool: POOL, rpcUrl: RPC_URL });
 // Wallet classification: one class-hash fetch per depositor address feeds
 // the /agg/wallet-families breakdown (activity by wallet software).
 startWalletClassify({ db, chain: CHAIN, pool: POOL, rpcUrl: RPC_URL });
+
+// Repair swaps recorded before legs carried a trade-time USD value. Runs
+// on a slow loop rather than once: token metadata (and its coingecko id)
+// arrives asynchronously from token-sync, so a later pass can fill rows
+// the first one had to skip. Once every row is priced this is a single
+// indexed query that finds nothing.
+const SWAP_PRICE_BACKFILL_MS = 30 * 60_000;
+async function runSwapPriceBackfill(): Promise<void> {
+  const filled = await backfillSwapPrices({
+    db,
+    chain: CHAIN,
+    history: coingeckoDailyPrices(),
+  });
+  if (filled > 0) console.log(`swap-price-backfill: filled ${filled} legacy swap rows`);
+}
+setTimeout(() => {
+  runSwapPriceBackfill().catch((e) =>
+    console.error("swap-price-backfill:", (e as Error).message)
+  );
+  setInterval(() => {
+    runSwapPriceBackfill().catch((e) =>
+      console.error("swap-price-backfill:", (e as Error).message)
+    );
+  }, SWAP_PRICE_BACKFILL_MS);
+}, 60_000);
 
 function required(key: string): string {
   const v = process.env[key];

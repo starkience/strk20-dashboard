@@ -20,6 +20,7 @@
 
 import { EVENT_SELECTORS, decodeVenueSwaps, type ReceiptEvent } from "@strk20/core";
 import type { Db } from "../cache/db.js";
+import { insertVenueSwaps } from "./venue-swap-store.js";
 
 const TICK_MS = 60_000;
 const BATCH_PER_TICK = 100;
@@ -47,11 +48,6 @@ export function startVenueVerify({ db, chain, pool, rpcUrl }: Opts): void {
   const markChecked = db.prepare(`
     INSERT OR REPLACE INTO tx_venue_checks (chain, tx_hash, checked_at, swaps_found)
     VALUES (?, ?, ?, ?)
-  `);
-  const insertSwap = db.prepare(`
-    INSERT OR REPLACE INTO venue_swaps
-      (chain, tx_hash, evt_index, day, venue, sell_token, sell_amount, buy_token, buy_amount)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   async function fetchReceiptEvents(txHash: string): Promise<ReceiptEvent[] | null> {
@@ -94,13 +90,7 @@ export function startVenueVerify({ db, chain, pool, rpcUrl }: Opts): void {
       const events = await fetchReceiptEvents(tx_hash);
       if (events === null) continue; // RPC hiccup — retry next tick
       const swaps = decodeVenueSwaps(events);
-      swaps.forEach((s, i) => {
-        insertSwap.run(
-          chain, tx_hash, i, day, s.venue,
-          s.sellToken, s.sellAmount?.toString() ?? null,
-          s.buyToken, s.buyAmount?.toString() ?? null
-        );
-      });
+      insertVenueSwaps(db, chain, tx_hash, day, swaps);
       markChecked.run(chain, tx_hash, Date.now(), swaps.length);
       if (swaps.length > 0) verified += 1;
       await new Promise((r) => setTimeout(r, FETCH_GAP_MS));

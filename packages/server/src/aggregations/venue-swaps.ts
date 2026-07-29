@@ -22,7 +22,7 @@ export interface VerifiedSwap {
 export function verifiedSwapsByTx(db: Db, chain: string): Map<string, VerifiedSwap> {
   const rows = db
     .prepare(
-      `SELECT tx_hash, venue, sell_token, sell_amount, buy_token, buy_amount
+      `SELECT tx_hash, venue, sell_token, sell_amount, buy_token, buy_amount, sell_usd, buy_usd
        FROM venue_swaps WHERE chain = ?`
     )
     .all(chain) as {
@@ -32,9 +32,21 @@ export function verifiedSwapsByTx(db: Db, chain: string): Map<string, VerifiedSw
     sell_amount: string | null;
     buy_token: string | null;
     buy_amount: string | null;
+    sell_usd: number | null;
+    buy_usd: number | null;
   }[];
 
-  const legUsd = (token: string | null, amount: string | null): number | null => {
+  /**
+   * Trade-time USD, frozen when the swap was recorded. The live-price
+   * path is only a fallback for rows recorded before their token had a
+   * quote — see services/venue-swap-store.ts.
+   */
+  const legUsd = (
+    stored: number | null,
+    token: string | null,
+    amount: string | null
+  ): number | null => {
+    if (stored != null && stored > 0) return stored;
     if (!token || !amount) return null;
     const meta = lookupToken(token);
     if (!meta || meta.usdApprox <= 0) return null;
@@ -47,7 +59,9 @@ export function verifiedSwapsByTx(db: Db, chain: string): Map<string, VerifiedSw
 
   const out = new Map<string, VerifiedSwap>();
   for (const r of rows) {
-    const usd = legUsd(r.sell_token, r.sell_amount) ?? legUsd(r.buy_token, r.buy_amount);
+    const usd =
+      legUsd(r.sell_usd, r.sell_token, r.sell_amount) ??
+      legUsd(r.buy_usd, r.buy_token, r.buy_amount);
     const prev = out.get(r.tx_hash);
     if (prev) {
       // Multiple venue events in one tx (multi-route): sum priced legs.

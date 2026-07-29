@@ -15,6 +15,7 @@
     "start": "tsx --env-file=../../.env src/index.ts",
     "start:prod": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
+    "test": "tsx --test \"src/**/*.test.ts\"",
     "build": "tsc"
   },
   "dependencies": {

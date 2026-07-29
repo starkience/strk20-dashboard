@@ -28,7 +28,7 @@ export interface SwapByToken {
 export function swapVolumeByToken(db: Db, chain: string, _pool: string): SwapByToken {
   const rows = db
     .prepare(
-      `SELECT day, sell_token, sell_amount, buy_token, buy_amount
+      `SELECT day, sell_token, sell_amount, buy_token, buy_amount, sell_usd, buy_usd
        FROM venue_swaps WHERE chain=? AND venue=?`
     )
     .all(chain, VENUE) as {
@@ -37,9 +37,21 @@ export function swapVolumeByToken(db: Db, chain: string, _pool: string): SwapByT
     sell_amount: string | null;
     buy_token: string | null;
     buy_amount: string | null;
+    sell_usd: number | null;
+    buy_usd: number | null;
   }[];
 
-  const legUsd = (token: string | null, amount: string | null): number | null => {
+  /**
+   * Trade-time USD, frozen when the swap was recorded. Only when that's
+   * missing (token unpriced back then) do we fall back to the live price,
+   * so an unrepaired row still counts instead of vanishing.
+   */
+  const legUsd = (
+    stored: number | null,
+    token: string | null,
+    amount: string | null
+  ): number | null => {
+    if (stored != null && stored > 0) return stored;
     if (!token || !amount) return null;
     const meta = lookupToken(normalizeHex(token));
     if (!meta || meta.usdApprox <= 0) return null;
@@ -63,10 +75,10 @@ export function swapVolumeByToken(db: Db, chain: string, _pool: string): SwapByT
     if (!r.day) continue;
     // Value on the sell leg, fall back to the buy leg; attribute to whichever
     // priced side we used.
-    let usd = legUsd(r.sell_token, r.sell_amount);
+    let usd = legUsd(r.sell_usd, r.sell_token, r.sell_amount);
     let sym = symbolOf(r.sell_token);
     if (usd == null) {
-      usd = legUsd(r.buy_token, r.buy_amount);
+      usd = legUsd(r.buy_usd, r.buy_token, r.buy_amount);
       sym = symbolOf(r.buy_token);
     }
     if (usd == null || usd <= 0 || !sym) continue;
