@@ -6,6 +6,7 @@ import { NoteAgeHistogram } from "./modules/NoteAgeHistogram.js";
 import { ShieldedTVL } from "./modules/ShieldedTVL.js";
 import { ActiveApps } from "./modules/ActiveApps.js";
 import { PoolCircle } from "./modules/PoolCircle.js";
+import { ActiveUsersChart } from "./modules/ActiveUsersChart.js";
 import { useApi } from "./lib/use-api.js";
 
 interface ApiHealth {
@@ -40,6 +41,7 @@ export function Dashboard() {
         </aside>
 
         <main data-strk20-right>
+          <ActiveUsersChart />
           <PoolCircle />
         </main>
       </div>
