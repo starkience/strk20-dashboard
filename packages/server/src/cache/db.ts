@@ -24,6 +24,13 @@ CREATE TABLE IF NOT EXISTS raw_events (
   topic2         TEXT,
   topic3         TEXT,
   data_json      TEXT NOT NULL,
+  -- Starkscan's own decoding of the log, carried alongside the raw felts by
+  -- the privacy-pool sync source. NULL on rows ingested before the switch
+  -- (and on any row the API returns undecoded), so every reader must treat
+  -- these as optional and keep its topic0/data path as the fallback.
+  event_name          TEXT,
+  public_fields_json  TEXT,
+  privacy_fees_json   TEXT,
   PRIMARY KEY (chain, contract, block_number, tx_index, log_index)
 );
 
@@ -40,6 +47,10 @@ CREATE TABLE IF NOT EXISTS sync_state (
   last_cursor        TEXT,
   backfill_complete  INTEGER NOT NULL DEFAULT 0,
   updated_at         INTEGER NOT NULL,
+  -- Which API route produced last_cursor. Cursors are opaque and scoped to
+  -- their route, so a stored cursor is only resumable by the same source;
+  -- changing source must drop it rather than replay it somewhere else.
+  source             TEXT,
   PRIMARY KEY (chain, contract)
 );
 
@@ -128,6 +139,10 @@ CREATE INDEX IF NOT EXISTS idx_view_cache_expires
 const ADDED_COLUMNS: { table: string; column: string; type: string }[] = [
   { table: "venue_swaps", column: "sell_usd", type: "REAL" },
   { table: "venue_swaps", column: "buy_usd", type: "REAL" },
+  { table: "raw_events", column: "event_name", type: "TEXT" },
+  { table: "raw_events", column: "public_fields_json", type: "TEXT" },
+  { table: "raw_events", column: "privacy_fees_json", type: "TEXT" },
+  { table: "sync_state", column: "source", type: "TEXT" },
 ];
 
 function applyColumnMigrations(db: DatabaseSync): void {

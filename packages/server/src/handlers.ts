@@ -77,6 +77,12 @@ export interface Freshness {
   cachedHeadBlock: number | null;
   /** Whether the full-history backfill has finished. */
   backfillComplete: boolean;
+  /**
+   * Which Starkscan route is feeding the cache. Null on a deployment that has
+   * not synced since sources were tracked — the one signal that says whether a
+   * rollout actually switched routes, so it is worth surfacing.
+   */
+  syncSource: string | null;
   /** True when the data should be treated as stale (drives a UI banner). */
   stale: boolean;
 }
@@ -111,6 +117,7 @@ export function createHandlers(deps: HandlerDeps) {
       lastEventAt: events.newestEventIso(chain, pool),
       cachedHeadBlock: events.latestBlock(chain, pool),
       backfillComplete: sync?.backfillComplete ?? false,
+      syncSource: sync?.source ?? null,
       stale: ageMs == null || ageMs > STALE_AFTER_MS,
     };
   }
@@ -163,6 +170,7 @@ export function createHandlers(deps: HandlerDeps) {
         lastSyncAt: f.lastSyncAt,
         lastSyncAgeSeconds: f.lastSyncAgeSeconds,
         lastEventAt: f.lastEventAt,
+        syncSource: f.syncSource,
         stale: f.stale || (headLagBlocks != null && headLagBlocks > STALE_LAG_BLOCKS),
       };
     },
