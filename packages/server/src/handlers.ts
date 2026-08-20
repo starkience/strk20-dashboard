@@ -203,21 +203,26 @@ export function createHandlers(deps: HandlerDeps) {
     /** Daily TVL from Starkscan-indexed flows, with today's endpoint pinned to
      *  Starkscan's finalized Privacy Pool snapshot. Cached 60s. */
     async tvlHistory() {
-      const key = `tvl-history:v2:${chain}:${pool}`;
-      const cached = views.get<unknown>(key);
-      if (cached) return cached;
       const tvl = await currentTvl(starkscan, db, views, tokenMeta, avnu, chain, pool);
-      const history = tvlHistory(db, chain, pool);
-      const last = history.days[history.days.length - 1];
-      if (last) last.tvlUsd = tvl.totalUsd;
+      const key = `tvl-history:v3:${chain}:${pool}`;
+      let history = views.get<ReturnType<typeof tvlHistory>>(key);
+      if (!history) {
+        history = tvlHistory(db, chain, pool);
+        views.put(key, history, 60_000);
+      }
+      // Cache the expensive historical reconstruction, never the live tail.
+      // A new response is pinned to the shared current-TVL snapshot every time.
+      const days = [...history.days];
+      const last = days[days.length - 1];
+      if (last) days[days.length - 1] = { ...last, tvlUsd: tvl.totalUsd };
       const result = {
         ...history,
+        days,
         source: "starkscan-events+starkscan-finalized",
         tvlSource: tvl.tvlSource,
         tvlAsOf: tvl.tvlAsOf,
         tvlAsOfBlock: tvl.tvlAsOfBlock,
       };
-      views.put(key, result, 60_000);
       return result;
     },
 
@@ -225,31 +230,35 @@ export function createHandlers(deps: HandlerDeps) {
      *  Drives the Shielded Balance stacked-bar chart (with hover totals).
      *  Today's stack is pinned to Starkscan's finalized snapshot. Cached 60s. */
     async shieldedBalance() {
-      const key = `shielded-balance:v2:${chain}:${pool}`;
-      const cached = views.get<unknown>(key);
-      if (cached) return cached;
       const tvl = await currentTvl(starkscan, db, views, tokenMeta, avnu, chain, pool);
-      const history = shieldedBalance(db, chain, pool);
-      const last = history.days[history.days.length - 1];
+      const key = `shielded-balance:v3:${chain}:${pool}`;
+      let history = views.get<ReturnType<typeof shieldedBalance>>(key);
+      if (!history) {
+        history = shieldedBalance(db, chain, pool);
+        views.put(key, history, 60_000);
+      }
+      const days = [...history.days];
+      const last = days[days.length - 1];
+      let tokens = [...history.tokens];
       if (last) {
         const byToken: Record<string, number> = {};
         for (const token of tvl.perToken) {
           if (token.balanceUsd <= 0) continue;
           byToken[token.symbol] = (byToken[token.symbol] ?? 0) + token.balanceUsd;
         }
-        last.total = tvl.totalUsd;
-        last.byToken = byToken;
+        days[days.length - 1] = { ...last, total: tvl.totalUsd, byToken };
         const latest = Object.keys(byToken).sort((a, b) => byToken[b]! - byToken[a]!);
-        history.tokens = [...latest, ...history.tokens.filter((symbol) => !(symbol in byToken))];
+        tokens = [...latest, ...history.tokens.filter((symbol) => !(symbol in byToken))];
       }
       const result = {
         ...history,
+        days,
+        tokens,
         source: "starkscan-events+starkscan-finalized",
         tvlSource: tvl.tvlSource,
         tvlAsOf: tvl.tvlAsOf,
         tvlAsOfBlock: tvl.tvlAsOfBlock,
       };
-      views.put(key, result, 60_000);
       return result;
     },
 
