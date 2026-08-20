@@ -348,7 +348,7 @@ export function createHandlers(deps: HandlerDeps) {
       return noteAgeBuckets(db, chain, pool);
     },
 
-    /** Live TVL via on-chain token balances. Cached 60s server-side. */
+    /** Starkscan finalized Privacy Pool TVL + explorer quotes. Cached 60s. */
     async tvl() {
       return currentTvl(starkscan, db, views, tokenMeta, avnu, chain, pool);
     },
@@ -362,6 +362,9 @@ export function createHandlers(deps: HandlerDeps) {
       const f = freshness();
       return {
         tvlUsd: tvl.totalUsd,
+        tvlSource: tvl.tvlSource,
+        tvlAsOfBlock: tvl.tvlAsOfBlock,
+        tvlAsOf: tvl.tvlAsOf,
         depositCount: tvl.depositCount,
         withdrawalCount: tvl.withdrawalCount,
         userCount: depositors.count,

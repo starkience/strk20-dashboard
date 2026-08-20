@@ -83,6 +83,70 @@ export interface ContractEntrypointsResponse {
   l1Handler: ContractEntrypoint[];
 }
 
+/**
+ * Supported accounting payload from Starkscan's Privacy Pool API.
+ *
+ * Raw amounts and address-keyed metadata are the integration contract. The
+ * deprecated valuation fields returned by Starkscan are deliberately omitted:
+ * callers must price these amounts independently.
+ */
+export interface PrivacyPoolTvlToken {
+  address: string;
+  symbol: string | null;
+  name: string | null;
+  decimals: number | null;
+}
+
+export interface PrivacyPoolTvlAsset {
+  token: PrivacyPoolTvlToken;
+  status: "complete" | "degraded";
+  reasonCode:
+    | "finalized_public_flow_ledger"
+    | "amount_decode_incomplete"
+    | "negative_protected_amount";
+  poolContractCount: number;
+  depositEventCount: number;
+  withdrawalEventCount: number;
+  depositAmountRaw: string;
+  withdrawalAmountRaw: string;
+  protectedAmountRaw: string;
+  protectedAmount: string | null;
+  missingAmountEventCount: number;
+}
+
+export interface PrivacyPoolTvlResponse {
+  schemaVersion: "1";
+  chainId: string;
+  scope: "strk20_privacy_pool";
+  accountingMethod: "finalized_public_flow_ledger_v1";
+  status: "complete" | "degraded" | "unavailable";
+  asOf: {
+    blockNumber: number | null;
+    blockHash: string | null;
+    blockTimestamp: string | null;
+    materializedAt: string | null;
+  };
+  coverage: {
+    status: "complete" | "partial" | "unavailable";
+    reasonCode: string;
+    finalizedOnly: true;
+    finalityBasis: "starkscan_indexed_finalized_tier";
+    latestL1AcceptedBlockNumber: number | null;
+    asOfL1Accepted: boolean | null;
+    fromBlockNumber: number | null;
+    throughBlockNumber: number | null;
+    latestEventBlockNumber: number | null;
+    latestEventCursor: string | null;
+    poolContractCount: number;
+    tokenCount: number;
+    missingAmountEventCount: number;
+    decodedMaterializationFresh: boolean | null;
+    decodedEventLagBlocks: number | null;
+  };
+  assets: PrivacyPoolTvlAsset[];
+  caveat: string;
+}
+
 export class StarkscanError extends Error {
   constructor(
     message: string,
@@ -128,6 +192,13 @@ export class StarkscanClient {
 
   async status(): Promise<StatusResponse> {
     return this.get<StatusResponse>(`/v1/${this.chain}/status`);
+  }
+
+  /** Finalized deposits-minus-withdrawals snapshot for the STRK20 pool. */
+  async privacyPoolTvl(): Promise<PrivacyPoolTvlResponse> {
+    return this.get<PrivacyPoolTvlResponse>(
+      `/v1/${this.chain}/privacy-pool/tvl`
+    );
   }
 
   async contractEntrypoints(address: string): Promise<ContractEntrypointsResponse> {

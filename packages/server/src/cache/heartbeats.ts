@@ -53,6 +53,6 @@ export class HeartbeatCache {
           WHERE ts >= ?
           ORDER BY ts ASC`
       )
-      .all(fromMs) as HeartbeatRow[];
+      .all(fromMs) as unknown as HeartbeatRow[];
   }
 }

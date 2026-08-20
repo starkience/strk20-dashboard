@@ -96,8 +96,9 @@ dedicated long-running server or a scheduled function — see notes below.)
   **no native build step and no C toolchain required**.
 - **pnpm** — the workspace uses the `workspace:*` protocol (npm/yarn won't resolve it).
 
-TVL (the most live metric) is computed from on-chain `balance-of` queries with a
-60s server-side cache, so it stays fresh independent of event sync cadence.
+TVL (the most live metric) comes from Starkscan's finalized Privacy Pool
+public-flow snapshot and its explorer market quotes, with a 60s server-side
+cache. On-chain balance and local event reconstruction are outage fallbacks.
 
 ## Address book curation (important before launch)
 
@@ -111,16 +112,12 @@ To curate:
 3. Drop the address into the corresponding entry in `addresses.ts` and set `needsCuration: false`
 4. Satellites auto-light-up — no rebuild needed (just restart the server)
 
-## Pricing (important before launch)
+## Pricing
 
-USD prices in `packages/core/src/tokens/registry.ts` are **hardcoded
-approximations**. Before launch, swap them for a live price feed. Two options:
-
-- **CoinGecko free tier:** ~50 req/min, no auth needed. Cache results 5 min.
-- **Pyth on Starknet:** on-chain prices, no external API.
-
-Each token has a `coingeckoId` field already; wire a small fetcher in the server
-that overrides `usdApprox` per-poll.
+Current address-keyed prices refresh from the same Starkscan market endpoints
+used by `starkscan.co/privacy-pool`. A token Starkscan leaves unpriced is also
+left unpriced here; stale values from another provider are never added to TVL.
+CoinGecko is retained only for historical daily swap-price backfills.
 
 ## What's not yet built
 

@@ -101,7 +101,14 @@ export function recentTransactions(
         ORDER BY block_number DESC, log_index DESC
         LIMIT ?`,
     )
-    .all(chain, pool, DEPOSIT_SEL, WITHDRAWAL_SEL, OPEN_NOTE_SEL, safeLimit * 4) as Row[];
+    .all(
+      chain,
+      pool,
+      DEPOSIT_SEL,
+      WITHDRAWAL_SEL,
+      OPEN_NOTE_SEL,
+      safeLimit * 4
+    ) as unknown as Row[];
 
   // Group rows per tx, preserving recency order of first appearance.
   const order: string[] = [];

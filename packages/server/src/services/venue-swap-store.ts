@@ -37,8 +37,8 @@ export function insertVenueSwaps(
 
 /**
  * USD value of one leg at the current price, or null when the token is
- * unknown/unpriced — the price feed warms up token-by-token, so an early
- * swap can land before its token has a quote. Null rows are repaired by
+ * unknown/unpriced — an early swap can land before the Starkscan market
+ * refresh has supplied its token quote. Null rows are repaired by
  * services/swap-price-backfill.ts.
  */
 export function priceLeg(token: string | null, amount: bigint | string | null): number | null {

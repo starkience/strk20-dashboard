@@ -2,8 +2,8 @@
 
 The server is a long-running Node 24 process (Starkscan indexer +
 aggregation API + SQLite cache). It is NOT serverless-compatible — it
-polls Starkscan every 2 minutes and sweeps CoinGecko prices every 12
-seconds in the background.
+polls Starkscan every 2 minutes and refreshes Starkscan market quotes once
+per minute in the background.
 
 ## One-time setup (Railway dashboard, ~5 minutes)
 
@@ -15,9 +15,10 @@ seconds in the background.
 
    | Variable | Value |
    |---|---|
-   | `STARKSCAN_BASE_URL` | `https://preview.188.245.249.37.nip.io/api` |
+   | `STARKSCAN_BASE_URL` | `https://api.starkscan.co` |
    | `STARKSCAN_API_KEY` | the `mzk_live_…` key (secret — never commit) |
    | `STARKSCAN_CHAIN` | `SN_MAIN` |
+   | `STARKSCAN_MARKET_BASE_URL` | `https://starkscan.co/api/market` |
    | `STRK20_POOL_ADDRESS` | `0x040337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a` |
    | `CACHE_DB_PATH` | `/data/cache.db` |
    | `API_CORS_ORIGIN` | `*` while testing; lock to the site origin for launch |
@@ -52,8 +53,8 @@ falls back to `http://localhost:8787` for local dev.
 
 - First boot backfills ~12k events (a few minutes). The dashboard
   serves partial numbers until `backfillComplete`.
-- The upstream Starkscan base URL is still their PREVIEW infra (raw IP
-  via nip.io, no SLA). Chase a production hostname before campaign
-  peak; it's a one-variable swap here when it lands.
+- Current TVL amounts come from Starkscan's authenticated finalized Privacy
+  Pool snapshot. USD values use the same address-keyed market quotes as the
+  Starkscan explorer; local on-chain/event reconstruction is outage-only.
 - Costs: hobby plan ~$5/mo covers this comfortably (one small service
   + 1 GB volume).

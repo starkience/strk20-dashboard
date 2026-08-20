@@ -58,8 +58,14 @@ import {
 } from "@strk20/dashboard";
 ```
 
+## Data source
+
+Current TVL mirrors Starkscan: the authenticated Privacy Pool TVL endpoint is
+the source for finalized token amounts and counts, and Starkscan's explorer
+market feed supplies the address-keyed USD quotes. The balance/event-derived
+calculation is used only when that authoritative snapshot is unavailable.
+
 ## Before launch (curation tasks)
 
 - Curate protocol addresses in `packages/core/src/protocols/addresses.ts` (use `/agg/top-callers` for empirical discovery)
-- Swap hardcoded USD prices in `packages/core/src/tokens/registry.ts` for a live feed (CoinGecko or Pyth)
 - Set up periodic `POST /sync` cron to keep the event cache fresh

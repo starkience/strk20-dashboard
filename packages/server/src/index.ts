@@ -191,7 +191,7 @@ async function runAutoSync() {
 
 runAutoSync().catch((e) => console.error("auto-sync failed:", e));
 
-// Token discovery + live USD pricing (Starkscan metadata, CoinGecko prices).
+// Token discovery + live USD pricing (Starkscan metadata and explorer quotes).
 startTokenSync({ db, starkscan, chain: CHAIN, pool: POOL });
 
 // Venue verification: one receipt fetch per round-trip tx upgrades

@@ -9,12 +9,9 @@
  *     renders real symbols/decimals instead of "?" / wrong scales.
  *
  * Pricing (continuous):
- *   - Starkscan's API exposes no USD prices, so prices come from CoinGecko.
- *   - One token per PRICE_TICK_MS via /simple/token_price/starknet
- *     (free tier allows a single contract address per call), always
- *     refreshing the stalest token first. ~5 calls/min stays comfortably
- *     inside CoinGecko's public rate limit; a full sweep of all pool
- *     tokens completes every few minutes.
+ *   - Address-keyed USD quotes come from Starkscan's explorer market feed,
+ *     matching the prices used on starkscan.co/privacy-pool.
+ *   - All registered pool tokens refresh together once per minute.
  *   - Prices persist to the token_prices table so restarts resume with
  *     the last known price instead of $0.
  */
@@ -31,10 +28,13 @@ import {
 } from "@strk20/core";
 import type { Db } from "../cache/db.js";
 import { TokenMetaCache } from "../cache/tokens.js";
+import {
+  fetchStarkscanMarketSnapshot,
+  resolveStarkscanPrice,
+} from "./starkscan-market.js";
 
 const DISCOVER_MS = 5 * 60_000;
-const PRICE_TICK_MS = 12_000;
-const COINGECKO_BASE = "https://api.coingecko.com/api/v3";
+const PRICE_REFRESH_MS = 60_000;
 
 interface Opts {
   db: Db;
@@ -46,7 +46,6 @@ interface Opts {
 export function startTokenSync({ db, starkscan, chain, pool }: Opts): void {
   const tokenMeta = new TokenMetaCache(db);
   const avnu = new AvnuTokenIndex();
-  const priceUpdatedAt = new Map<string, number>();
 
   // Warm-start prices from the last run.
   const persisted = db
@@ -132,52 +131,18 @@ export function startTokenSync({ db, starkscan, chain, pool }: Opts): void {
     }
   }
 
-  /** CoinGecko's Starknet platform keys tokens by 0x + 64-hex (zero-padded). */
-  function padAddress(address: string): string {
-    return "0x" + address.replace(/^0x/, "").padStart(64, "0");
-  }
-
-  async function priceTick(): Promise<void> {
+  async function refreshPrices(): Promise<void> {
     const tokens = allTokens();
     if (tokens.length === 0) return;
-    // Stalest first, so new tokens get priced quickly and the whole set
-    // stays uniformly fresh.
-    tokens.sort(
-      (a, b) =>
-        (priceUpdatedAt.get(a.address) ?? 0) - (priceUpdatedAt.get(b.address) ?? 0)
-    );
-    const target = tokens[0];
-    if (!target) return;
-    // Mark attempted up front so an unpriceable token (not listed on
-    // CoinGecko) rotates to the back instead of starving the others.
-    priceUpdatedAt.set(target.address, Date.now());
-    try {
-      const padded = padAddress(target.address);
-      const res = await fetch(
-        `${COINGECKO_BASE}/simple/token_price/starknet?contract_addresses=${padded}&vs_currencies=usd`
-      );
-      if (!res.ok) return;
-      const body = (await res.json()) as Record<string, { usd?: number }>;
-      let usd = body[padded]?.usd ?? body[target.address]?.usd;
-
-      // Not listed by contract (e.g. strkBTC) — fall back to the pegged
-      // coingeckoId where one is known.
-      if (usd == null && target.coingeckoId) {
-        const idRes = await fetch(
-          `${COINGECKO_BASE}/simple/price?ids=${target.coingeckoId}&vs_currencies=usd`
-        );
-        if (idRes.ok) {
-          const idBody = (await idRes.json()) as Record<string, { usd?: number }>;
-          usd = idBody[target.coingeckoId]?.usd;
-        }
-      }
-
-      if (typeof usd === "number" && isFinite(usd) && usd > 0) {
-        setTokenPrice(target.address, usd);
-        upsertPrice.run(target.address, usd, Date.now());
-      }
-    } catch {
-      /* network hiccup — next tick retries the same (still stalest) token */
+    const market = await fetchStarkscanMarketSnapshot(tokens.map((token) => token.address));
+    const updatedAt = Date.now();
+    for (const token of tokens) {
+      const quote = resolveStarkscanPrice(market, token.address, token.symbol);
+      const usd = quote?.priceUsd ?? 0;
+      // A null quote must clear a previously persisted price so every
+      // aggregation follows Starkscan's current priced/unpriced decision.
+      setTokenPrice(token.address, usd);
+      upsertPrice.run(token.address, usd, updatedAt);
     }
   }
 
@@ -185,7 +150,6 @@ export function startTokenSync({ db, starkscan, chain, pool }: Opts): void {
     // Registered tokens pick the price up immediately; tokens discovered
     // later re-read from this table via setTokenPrice after registration.
     setTokenPrice(p.address, p.usd);
-    priceUpdatedAt.set(p.address, p.updated_at);
   }
 
   void discover()
@@ -193,9 +157,10 @@ export function startTokenSync({ db, starkscan, chain, pool }: Opts): void {
       // Apply persisted prices again now that discovery registered everything.
       for (const p of persisted) setTokenPrice(p.address, p.usd);
       console.log(`token-sync: ${allTokens().length} tokens registered`);
+      return refreshPrices();
     })
     .catch((e) => console.error("token-sync discover failed:", e));
 
   setInterval(() => void discover().catch(() => {}), DISCOVER_MS);
-  setInterval(() => void priceTick(), PRICE_TICK_MS);
+  setInterval(() => void refreshPrices().catch(() => {}), PRICE_REFRESH_MS);
 }
