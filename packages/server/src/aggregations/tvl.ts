@@ -109,11 +109,18 @@ export interface TvlSummary {
   withdrawalCount: number;
   tokenCount: number;
   perToken: TokenTvl[];
+  /** Positive-balance assets Starkscan does not currently value in USD. */
+  unpricedTokenCount: number;
+  /** Whether every positive balance has a Starkscan explorer quote. */
+  priceCoverageComplete: boolean;
+  /** True only when the accounting snapshot itself is incomplete. */
   partial: boolean;
   fetchedAt: number;
 }
 
-const TVL_CACHE_KEY = "tvl:current";
+// Versioned so a deploy cannot briefly reuse an older summary whose `partial`
+// field conflated accounting completeness with missing price coverage.
+const TVL_CACHE_KEY = "tvl:current:v2";
 const TVL_TTL_MS = 60_000;
 
 /**
@@ -241,6 +248,8 @@ export async function currentTvl(
     withdrawalCount,
     tokenCount: perToken.length,
     perToken,
+    unpricedTokenCount: perToken.filter((token) => token.balanceHuman > 0 && !token.priced).length,
+    priceCoverageComplete: perToken.every((token) => token.balanceHuman <= 0 || token.priced),
     partial,
     fetchedAt: Date.now(),
   };
@@ -272,7 +281,7 @@ async function currentStarkscanTvl(
   const fetchedAt = Date.now();
   const perToken: TokenTvl[] = [];
   let totalUsd = 0;
-  let hasUnpricedBalance = false;
+  let unpricedTokenCount = 0;
 
   for (const asset of snapshot.assets) {
     const address = normalizeHex(asset.token.address);
@@ -306,7 +315,7 @@ async function currentStarkscanTvl(
     const balanceRaw = asset.protectedAmountRaw;
     const balanceHuman = applyDecimals(balanceRaw, decimals);
     const balanceUsd = balanceHuman * priceUsd;
-    if (balanceHuman > 0 && !resolvedPrice) hasUnpricedBalance = true;
+    if (balanceHuman > 0 && !resolvedPrice) unpricedTokenCount += 1;
     totalUsd += balanceUsd;
 
     perToken.push({
@@ -347,7 +356,12 @@ async function currentStarkscanTvl(
     withdrawalCount: allTokenCounts.reduce((sum, count) => sum + count.withdrawalCount, 0),
     tokenCount: perToken.length,
     perToken,
-    partial: hasUnpricedBalance,
+    unpricedTokenCount,
+    priceCoverageComplete: unpricedTokenCount === 0,
+    // Snapshot completeness and price coverage are separate concepts.
+    // Starkscan's complete accounting snapshot remains authoritative when
+    // its explorer intentionally leaves a positive-balance asset unpriced.
+    partial: false,
     fetchedAt,
   };
 }

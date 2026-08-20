@@ -81,8 +81,74 @@ test("values Starkscan finalized amounts with Starkscan explorer quotes", async 
     assert.equal(result.tvlSource, "starkscan-finalized");
     assert.equal(result.tvlAsOfBlock, 123);
     assert.equal(result.totalUsd, 27_098);
+    assert.equal(result.partial, false);
+    assert.equal(result.unpricedTokenCount, 0);
+    assert.equal(result.priceCoverageComplete, true);
     assert.equal(result.perToken.find((token) => token.symbol === "SLAY")?.balanceUsd, 27_000);
     assert.equal(result.perToken.find((token) => token.symbol === "USDC")?.balanceUsd, 98);
+  } finally {
+    globalThis.fetch = originalFetch;
+    db.close();
+  }
+});
+
+test("keeps a complete Starkscan snapshot cacheable when an asset is unpriced", async () => {
+  const snapshot: PrivacyPoolTvlResponse = {
+    schemaVersion: "1",
+    chainId: "SN_MAIN",
+    scope: "strk20_privacy_pool",
+    accountingMethod: "finalized_public_flow_ledger_v1",
+    status: "complete",
+    asOf: {
+      blockNumber: 123,
+      blockHash: "0xabc",
+      blockTimestamp: "2026-08-20T10:00:00.000Z",
+      materializedAt: "2026-08-20T10:00:01.000Z",
+    },
+    coverage: {
+      status: "complete",
+      reasonCode: "finalized_public_flow_ledger",
+      finalizedOnly: true,
+      finalityBasis: "starkscan_indexed_finalized_tier",
+      latestL1AcceptedBlockNumber: 120,
+      asOfL1Accepted: false,
+      fromBlockNumber: 1,
+      throughBlockNumber: 123,
+      latestEventBlockNumber: 122,
+      latestEventCursor: "122:1:0",
+      poolContractCount: 1,
+      tokenCount: 1,
+      missingAmountEventCount: 0,
+      decodedMaterializationFresh: true,
+      decodedEventLagBlocks: 0,
+    },
+    assets: [asset(SLAY, "SLAY", 18, "1000000000000000000")],
+    caveat: "finalized public flow",
+  };
+  const client = new StarkscanClient({
+    baseUrl: "https://api.starkscan.test",
+    apiKey: "test-key",
+    maxRetries: 0,
+    fetch: (async () => Response.json(snapshot)) as typeof fetch,
+  });
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => Response.json({ items: [] })) as typeof fetch;
+  const db = openCache(":memory:");
+  try {
+    const result = await currentTvl(
+      client,
+      db,
+      new ViewCache(db),
+      new TokenMetaCache(db),
+      new AvnuTokenIndex(),
+      "SN_MAIN",
+      "0xpool"
+    );
+    assert.equal(result.totalUsd, 0);
+    assert.equal(result.partial, false);
+    assert.equal(result.unpricedTokenCount, 1);
+    assert.equal(result.priceCoverageComplete, false);
   } finally {
     globalThis.fetch = originalFetch;
     db.close();

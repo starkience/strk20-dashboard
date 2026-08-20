@@ -200,90 +200,123 @@ export function createHandlers(deps: HandlerDeps) {
       return result;
     },
 
-    /** Daily TVL series from event flows at current prices. Cached 5m. */
+    /** Daily TVL from Starkscan-indexed flows, with today's endpoint pinned to
+     *  Starkscan's finalized Privacy Pool snapshot. Cached 60s. */
     async tvlHistory() {
-      const key = `tvl-history:${chain}:${pool}`;
+      const key = `tvl-history:v2:${chain}:${pool}`;
       const cached = views.get<unknown>(key);
       if (cached) return cached;
-      const result = tvlHistory(db, chain, pool);
-      views.put(key, result, 5 * 60_000);
+      const tvl = await currentTvl(starkscan, db, views, tokenMeta, avnu, chain, pool);
+      const history = tvlHistory(db, chain, pool);
+      const last = history.days[history.days.length - 1];
+      if (last) last.tvlUsd = tvl.totalUsd;
+      const result = {
+        ...history,
+        source: "starkscan-events+starkscan-finalized",
+        tvlSource: tvl.tvlSource,
+        tvlAsOf: tvl.tvlAsOf,
+        tvlAsOfBlock: tvl.tvlAsOfBlock,
+      };
+      views.put(key, result, 60_000);
       return result;
     },
 
     /** Per-token shielded balance, daily — the breakdown behind tvl-history.
      *  Drives the Shielded Balance stacked-bar chart (with hover totals).
-     *  sum(byToken) per day == that day's tvl-history tvlUsd. Cached 5m. */
+     *  Today's stack is pinned to Starkscan's finalized snapshot. Cached 60s. */
     async shieldedBalance() {
-      const key = `shielded-balance:${chain}:${pool}`;
+      const key = `shielded-balance:v2:${chain}:${pool}`;
       const cached = views.get<unknown>(key);
       if (cached) return cached;
-      const result = shieldedBalance(db, chain, pool);
-      views.put(key, result, 5 * 60_000);
+      const tvl = await currentTvl(starkscan, db, views, tokenMeta, avnu, chain, pool);
+      const history = shieldedBalance(db, chain, pool);
+      const last = history.days[history.days.length - 1];
+      if (last) {
+        const byToken: Record<string, number> = {};
+        for (const token of tvl.perToken) {
+          if (token.balanceUsd <= 0) continue;
+          byToken[token.symbol] = (byToken[token.symbol] ?? 0) + token.balanceUsd;
+        }
+        last.total = tvl.totalUsd;
+        last.byToken = byToken;
+        const latest = Object.keys(byToken).sort((a, b) => byToken[b]! - byToken[a]!);
+        history.tokens = [...latest, ...history.tokens.filter((symbol) => !(symbol in byToken))];
+      }
+      const result = {
+        ...history,
+        source: "starkscan-events+starkscan-finalized",
+        tvlSource: tvl.tvlSource,
+        tvlAsOf: tvl.tvlAsOf,
+        tvlAsOfBlock: tvl.tvlAsOfBlock,
+      };
+      views.put(key, result, 60_000);
       return result;
     },
 
     /** Privately routed volume by protocol (avnu/ekubo/vesu…), daily.
-     *  Powers the "private actions per DeFi" stacked-bar chart. Cached 5m. */
+     *  Powers the "private actions per DeFi" stacked-bar chart. Cached 60s. */
     async routedVolume() {
-      const key = `routed-volume:${chain}:${pool}`;
+      const key = `routed-volume:v2:${chain}:${pool}`;
       const cached = views.get<unknown>(key);
       if (cached) return cached;
+      await currentTvl(starkscan, db, views, tokenMeta, avnu, chain, pool);
       const result = routedVolume(db, chain, pool);
-      views.put(key, result, 5 * 60_000);
+      views.put(key, result, 60_000);
       return result;
     },
 
     /** Private swap volume per token (AVNU), daily — the per-token swap chart.
-     *  Cached 5m. */
+     *  Cached 60s. */
     async swapVolumeByToken() {
-      const key = `swap-by-token:${chain}:${pool}`;
+      const key = `swap-by-token:v2:${chain}:${pool}`;
       const cached = views.get<unknown>(key);
       if (cached) return cached;
+      await currentTvl(starkscan, db, views, tokenMeta, avnu, chain, pool);
       const result = swapVolumeByToken(db, chain, pool);
-      views.put(key, result, 5 * 60_000);
+      views.put(key, result, 60_000);
       return result;
     },
 
-    /** Private actions (count) by protocol (avnu/ekubo/vesu), daily. Cached 5m. */
+    /** Private actions (count) by protocol (avnu/ekubo/vesu), daily. Cached 60s. */
     async actionsByProtocol() {
-      const key = `actions-by-protocol:${chain}:${pool}`;
+      const key = `actions-by-protocol:v2:${chain}:${pool}`;
       const cached = views.get<unknown>(key);
       if (cached) return cached;
       const result = actionsByProtocol(db, chain, pool);
-      views.put(key, result, 5 * 60_000);
+      views.put(key, result, 60_000);
       return result;
     },
 
-    /** Pool transactions per day (distinct tx hashes). Cached 5m. */
+    /** Pool transactions per day (distinct tx hashes). Cached 60s. */
     async transactionsPerDay() {
-      const key = `transactions-per-day:${chain}:${pool}`;
+      const key = `transactions-per-day:v2:${chain}:${pool}`;
       const cached = views.get<unknown>(key);
       if (cached) return cached;
       const result = transactionsPerDay(db, chain, pool);
-      views.put(key, result, 5 * 60_000);
+      views.put(key, result, 60_000);
       return result;
     },
 
     /** User registrations per day (first ViewingKeySet per address), with
-     *  running user total. The pool's user-growth curve. Cached 5m. */
+     *  running user total. The pool's user-growth curve. Cached 60s. */
     async registrations() {
-      const key = `registrations:${chain}:${pool}`;
+      const key = `registrations:v2:${chain}:${pool}`;
       const cached = views.get<unknown>(key);
       if (cached) return cached;
       const result = registrationsPerDay(db, chain, pool);
-      views.put(key, result, 5 * 60_000);
+      views.put(key, result, 60_000);
       return result;
     },
 
     /** Daily active users — distinct addresses that shielded (Deposit) each UTC
      *  day, plus the all-time distinct total. Engagement counterpart to the
-     *  registrations growth curve. Cached 5m. */
+     *  registrations growth curve. Cached 60s. */
     async activeUsersPerDay() {
-      const key = `active-users-per-day:${chain}:${pool}`;
+      const key = `active-users-per-day:v2:${chain}:${pool}`;
       const cached = views.get<unknown>(key);
       if (cached) return cached;
       const result = activeUsersPerDay(db, chain, pool);
-      views.put(key, result, 5 * 60_000);
+      views.put(key, result, 60_000);
       return result;
     },
 
@@ -300,13 +333,13 @@ export function createHandlers(deps: HandlerDeps) {
     },
 
     /** Daily volume by category (shielded in/out, swap, stake, lend),
-     *  for the Volume stacked-bars chart. Cached 5m. */
+     *  for the Volume stacked-bars chart. Cached 60s. */
     async volumeHistory() {
-      const key = `volume-history:${chain}:${pool}`;
+      const key = `volume-history:v2:${chain}:${pool}`;
       const cached = views.get<unknown>(key);
       if (cached) return cached;
       const result = volumeHistory(db, chain, pool);
-      views.put(key, result, 5 * 60_000);
+      views.put(key, result, 60_000);
       return result;
     },
 
@@ -370,6 +403,8 @@ export function createHandlers(deps: HandlerDeps) {
         userCount: depositors.count,
         anonymitySetUnspent: anon.unspent,
         partial: tvl.partial,
+        unpricedTokenCount: tvl.unpricedTokenCount,
+        priceCoverageComplete: tvl.priceCoverageComplete,
         perToken: tvl.perToken,
         deposits24h: w.deposits,
         withdrawals24h: w.withdrawals,
