@@ -22,6 +22,9 @@
  *            a router-mediated flow ships. Their relationship to the pool
  *            is asset-level, not call-level.
  *
+ *   OFFMARKET — CONFIRMED INTEGRATED. Dedicated inbound and outbound
+ *            anonymizers bridge the privacy pool to its Polymarket flow.
+ *
  * Each protocol can have multiple addresses (router + paymaster + vault, etc).
  * The classifier matches against any of them.
  */
@@ -83,6 +86,18 @@ export const PROTOCOLS: ProtocolDefinition[] = [
     ],
     needsCuration: false,
     integrationType: "amm",
+  },
+  {
+    id: "offmarket",
+    label: "OFFMARKET",
+    addresses: [
+      // OutboundAnonymizer
+      "0x009067f35d2cab3cb933f3d78793660402026f8fa31e041ca2cab4a8e9a49092",
+      // InboundAnonymizer
+      "0x03a7e7f34e530f8ec00b1ff7eaca90a136311d9da7cb17a73203f813b56c86cb",
+    ],
+    needsCuration: false,
+    integrationType: "router",
   },
   {
     id: "vesu",
