@@ -52,6 +52,10 @@ export interface ProtocolDefinition {
     | "pending";
 }
 
+/** Dedicated mainnet STRK20 execution contract for private Ekubo swaps. */
+export const EKUBO_SWAP_ANONYMIZER_ADDRESS =
+  "0x029c55514b13a1198ff004ff4e52d282bf98daf4c5c0dfc0303c390ec6615c15";
+
 export const PROTOCOLS: ProtocolDefinition[] = [
   {
     id: "avnu",
@@ -79,6 +83,8 @@ export const PROTOCOLS: ProtocolDefinition[] = [
     id: "ekubo",
     label: "Ekubo",
     addresses: [
+      // STRK20 private-swap anonymizer (mainnet)
+      EKUBO_SWAP_ANONYMIZER_ADDRESS,
       // Ekubo Core
       "0x00000005dd3d2f4429af886cd1a3b08289dbcea99a294197e9eb43b0e0325b4b",
       // Router V3.0.13

@@ -3,6 +3,7 @@ import {
   EVENT_SELECTORS,
   lookupToken,
   applyDecimals,
+  EKUBO_SWAP_ANONYMIZER_ADDRESS,
   normalizeHex,
   protocolForAddress,
 } from "@strk20/core";
@@ -15,8 +16,11 @@ import { classifyRoundTrip } from "./window.js";
  * OpenNoteDeposited of token B in the same tx), plus explicitly registered
  * one-way anonymizer withdrawals, are attributed to the protocol they route
  * through and valued on their OUT leg:
- *   - swap  → the venue from venue-verification (avnu / ekubo); valued at the
- *             venue-reported size, falling back to the withdrawal leg.
+ *   - swap  → the venue from venue-verification (avnu / ekubo). Ekubo also
+ *             requires the pool withdrawal destination to be its registered
+ *             STRK20 anonymizer and is valued from that exact outbound leg.
+ *             Other venues use the venue-reported size, falling back to the
+ *             withdrawal leg.
  *   - lend  → vesu        (wrap convention, see classifyRoundTrip)
  *   - stake → endur
  *   - prediction market → offmarket, when a Withdrawal is sent to one of
@@ -76,6 +80,7 @@ export function routedVolume(db: Db, chain: string, pool: string): RoutedVolume 
     outs: Set<string>;
     ins: Set<string>;
     outUsd: number;
+    ekuboOutUsd: number;
     offmarketOutUsd: number;
   }
   const byTx = new Map<string, TxAcc>();
@@ -88,6 +93,7 @@ export function routedVolume(db: Db, chain: string, pool: string): RoutedVolume 
         outs: new Set(),
         ins: new Set(),
         outUsd: 0,
+        ekuboOutUsd: 0,
         offmarketOutUsd: 0,
       };
       byTx.set(r.tx_hash, e);
@@ -101,6 +107,12 @@ export function routedVolume(db: Db, chain: string, pool: string): RoutedVolume 
           const data = JSON.parse(r.data_json) as string[];
           const usd = applyDecimals(BigInt(data[3] ?? "0x0"), meta.decimals) * meta.usdApprox;
           e.outUsd += usd;
+          if (
+            r.topic1 &&
+            normalizeHex(r.topic1) === normalizeHex(EKUBO_SWAP_ANONYMIZER_ADDRESS)
+          ) {
+            e.ekuboOutUsd += usd;
+          }
           if (r.topic1 && protocolForAddress(r.topic1) === "offmarket") {
             e.offmarketOutUsd += usd;
           }
@@ -137,7 +149,16 @@ export function routedVolume(db: Db, chain: string, pool: string): RoutedVolume 
     else if (kind === "swap") {
       const v = verified.get(tx);
       if (!v) continue; // unverified swap — not counted
-      add(e.day, (v.venue || "swap").toLowerCase(), v.usd ?? e.outUsd);
+      const venue = (v.venue || "swap").toLowerCase();
+      if (venue === "ekubo") {
+        // A Core Swapped event proves execution; the dedicated anonymizer
+        // destination proves this was Ekubo's STRK20 private route. Value only
+        // the pool's outbound leg so the returned deposit is not double-counted.
+        if (!(e.ekuboOutUsd > 0)) continue;
+        add(e.day, venue, e.ekuboOutUsd);
+      } else {
+        add(e.day, venue, v.usd ?? e.outUsd);
+      }
     }
   }
 
