@@ -16,11 +16,11 @@ import { classifyRoundTrip } from "./window.js";
  * OpenNoteDeposited of token B in the same tx), plus explicitly registered
  * one-way anonymizer withdrawals, are attributed to the protocol they route
  * through and valued on their OUT leg:
- *   - swap  → the venue from venue-verification (avnu / ekubo). Ekubo also
- *             requires the pool withdrawal destination to be its registered
- *             STRK20 anonymizer and is valued from that exact outbound leg.
- *             Other venues use the venue-reported size, falling back to the
- *             withdrawal leg.
+ *   - swap  → AVNU uses venue-verification and the venue-reported size,
+ *             falling back to the withdrawal leg.
+ *   - Ekubo → a Withdrawal sent to its dedicated STRK20 anonymizer. The
+ *             shipped flow is one-way at the pool boundary, so the anonymizer
+ *             destination itself is the authoritative attribution signal.
  *   - lend  → vesu        (wrap convention, see classifyRoundTrip)
  *   - stake → endur
  *   - prediction market → offmarket, when a Withdrawal is sent to one of
@@ -135,6 +135,14 @@ export function routedVolume(db: Db, chain: string, pool: string): RoutedVolume 
   };
 
   for (const [tx, e] of byTx) {
+    // Ekubo's dedicated STRK20 anonymizer receives the private swap input
+    // directly from the pool. Count that outbound value once. Do not require a
+    // same-tx return deposit/Core receipt: production activity shows this flow
+    // is one-way at the privacy-pool boundary.
+    if (e.ekuboOutUsd > 0) {
+      add(e.day, "ekubo", e.ekuboOutUsd);
+      continue;
+    }
     // OFFMARKET's public comparator is trading volume, so count the funds
     // sent from the pool into its anonymizer and do not add the later return
     // deposit. A directly attributed transaction also wins over the generic
@@ -150,15 +158,10 @@ export function routedVolume(db: Db, chain: string, pool: string): RoutedVolume 
       const v = verified.get(tx);
       if (!v) continue; // unverified swap — not counted
       const venue = (v.venue || "swap").toLowerCase();
-      if (venue === "ekubo") {
-        // A Core Swapped event proves execution; the dedicated anonymizer
-        // destination proves this was Ekubo's STRK20 private route. Value only
-        // the pool's outbound leg so the returned deposit is not double-counted.
-        if (!(e.ekuboOutUsd > 0)) continue;
-        add(e.day, venue, e.ekuboOutUsd);
-      } else {
-        add(e.day, venue, v.usd ?? e.outUsd);
-      }
+      // Ekubo is counted only by its dedicated anonymizer branch above. Core
+      // swaps without that route are public/unattributed, not private volume.
+      if (venue === "ekubo") continue;
+      add(e.day, venue, v.usd ?? e.outUsd);
     }
   }
 

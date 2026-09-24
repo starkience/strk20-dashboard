@@ -91,7 +91,7 @@ test("OFFMARKET volume counts outbound anonymizer withdrawals once", () => {
   assert.ok(result.protocols.includes("offmarket"));
 });
 
-test("Ekubo volume requires its anonymizer and a verified Core swap", () => {
+test("Ekubo volume is the outbound value sent to its dedicated anonymizer", () => {
   const db = openCache(":memory:");
 
   const addRoundTrip = (block: number, tx: string, caller: string): void => {
@@ -112,9 +112,18 @@ test("Ekubo volume requires its anonymizer and a verified Core swap", () => {
     });
   };
 
-  addRoundTrip(10, "0xekubo-private", EKUBO_SWAP_ANONYMIZER_ADDRESS);
+  // The shipped private route is one-way at the pool boundary: a withdrawal
+  // to the dedicated anonymizer is sufficient and must be counted once.
+  insertEvent(db, {
+    block: 10,
+    tx: "0xekubo-private",
+    selector: EVENT_SELECTORS.Withdrawal,
+    caller: EKUBO_SWAP_ANONYMIZER_ADDRESS,
+    data: ["0x0", "0x0", "0x0", "0xee6b280"], // $250 outbound
+  });
+  // A verified Ekubo Core swap using another destination is not STRK20
+  // private volume and must remain excluded.
   addRoundTrip(20, "0xekubo-public-route", "0x1234");
-  addRoundTrip(30, "0xekubo-unverified", EKUBO_SWAP_ANONYMIZER_ADDRESS);
 
   const insertVerifiedEkubo = db.prepare(
     `INSERT INTO venue_swaps
@@ -122,7 +131,6 @@ test("Ekubo volume requires its anonymizer and a verified Core swap", () => {
         sell_token, sell_amount, buy_token, buy_amount, sell_usd, buy_usd)
      VALUES (?, ?, 0, ?, 'ekubo', NULL, NULL, NULL, NULL, NULL, NULL)`,
   );
-  insertVerifiedEkubo.run(CHAIN, "0xekubo-private", "2026-08-31");
   insertVerifiedEkubo.run(CHAIN, "0xekubo-public-route", "2026-08-31");
 
   const result = routedVolume(db, CHAIN, POOL);
