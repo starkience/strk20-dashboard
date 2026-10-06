@@ -19,10 +19,19 @@ export function insertVenueSwaps(
   swaps: VenueSwap[]
 ): void {
   const stmt = db.prepare(`
-    INSERT OR REPLACE INTO venue_swaps
+    INSERT INTO venue_swaps
       (chain, tx_hash, evt_index, day, venue,
        sell_token, sell_amount, buy_token, buy_amount, sell_usd, buy_usd)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(chain, tx_hash, evt_index) DO UPDATE SET
+      day = excluded.day,
+      venue = excluded.venue,
+      sell_token = COALESCE(venue_swaps.sell_token, excluded.sell_token),
+      sell_amount = COALESCE(venue_swaps.sell_amount, excluded.sell_amount),
+      buy_token = COALESCE(venue_swaps.buy_token, excluded.buy_token),
+      buy_amount = COALESCE(venue_swaps.buy_amount, excluded.buy_amount),
+      sell_usd = COALESCE(venue_swaps.sell_usd, excluded.sell_usd),
+      buy_usd = COALESCE(venue_swaps.buy_usd, excluded.buy_usd)
   `);
   swaps.forEach((s, i) => {
     stmt.run(

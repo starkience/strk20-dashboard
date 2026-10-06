@@ -55,6 +55,7 @@ import { relayerConcentration } from "./aggregations/relayer-concentration.js";
 import { recentTransactions } from "./aggregations/recent-transactions.js";
 import { uptimeHistory } from "./aggregations/uptime.js";
 import { contractUptime } from "./aggregations/contract-uptime.js";
+import { materializeEkuboPrivateSwaps } from "./services/ekubo-swap-materialize.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -169,7 +170,9 @@ export function createHandlers(deps: HandlerDeps) {
 
     /** Incremental sync of pool events into the cache. */
     async sync(opts: { pageSize?: number; maxPages?: number } = {}) {
-      return syncContractEvents(starkscan, events, chain, pool, opts);
+      const result = await syncContractEvents(starkscan, events, chain, pool, opts);
+      const ekuboSwapsMaterialized = materializeEkuboPrivateSwaps(db, chain, pool);
+      return { ...result, ekuboSwapsMaterialized };
     },
 
     /** Anonymity set (created notes − spent notes). */
@@ -265,22 +268,24 @@ export function createHandlers(deps: HandlerDeps) {
     /** Privately routed volume by protocol (avnu/ekubo/vesu…), daily.
      *  Powers the "private actions per DeFi" stacked-bar chart. Cached 60s. */
     async routedVolume() {
-      const key = `routed-volume:v2:${chain}:${pool}`;
+      const key = `routed-volume:v3:${chain}:${pool}`;
       const cached = views.get<unknown>(key);
       if (cached) return cached;
       await currentTvl(starkscan, db, views, tokenMeta, avnu, chain, pool);
+      materializeEkuboPrivateSwaps(db, chain, pool);
       const result = routedVolume(db, chain, pool);
       views.put(key, result, 60_000);
       return result;
     },
 
-    /** Private swap volume per token (AVNU), daily — the per-token swap chart.
+    /** Private swap volume per traded asset and venue (AVNU + Ekubo), daily.
      *  Cached 60s. */
     async swapVolumeByToken() {
-      const key = `swap-by-token:v2:${chain}:${pool}`;
+      const key = `swap-by-token:v3:${chain}:${pool}`;
       const cached = views.get<unknown>(key);
       if (cached) return cached;
       await currentTvl(starkscan, db, views, tokenMeta, avnu, chain, pool);
+      materializeEkuboPrivateSwaps(db, chain, pool);
       const result = swapVolumeByToken(db, chain, pool);
       views.put(key, result, 60_000);
       return result;

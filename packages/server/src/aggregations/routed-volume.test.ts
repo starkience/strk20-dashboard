@@ -6,6 +6,7 @@ import {
   registerToken,
 } from "@strk20/core";
 import { openCache } from "../cache/db.js";
+import { materializeEkuboPrivateSwaps } from "../services/ekubo-swap-materialize.js";
 import { routedVolume } from "./routed-volume.js";
 
 const CHAIN = "SN_TEST";
@@ -91,7 +92,7 @@ test("OFFMARKET volume counts outbound anonymizer withdrawals once", () => {
   assert.ok(result.protocols.includes("offmarket"));
 });
 
-test("Ekubo volume is the outbound value sent to its dedicated anonymizer", () => {
+test("Ekubo volume uses the exact legs of swaps through its dedicated anonymizer", () => {
   const db = openCache(":memory:");
 
   const addRoundTrip = (block: number, tx: string, caller: string): void => {
@@ -112,14 +113,22 @@ test("Ekubo volume is the outbound value sent to its dedicated anonymizer", () =
     });
   };
 
-  // The shipped private route is one-way at the pool boundary: a withdrawal
-  // to the dedicated anonymizer is sufficient and must be counted once.
+  // $250 enters the exact-input anonymizer.
   insertEvent(db, {
     block: 10,
     tx: "0xekubo-private",
     selector: EVENT_SELECTORS.Withdrawal,
     caller: EKUBO_SWAP_ANONYMIZER_ADDRESS,
     data: ["0x0", "0x0", "0x0", "0xee6b280"], // $250 outbound
+  });
+  // The anonymizer sends the resulting output back into an open note.
+  insertEvent(db, {
+    block: 11,
+    tx: "0xekubo-private",
+    selector: EVENT_SELECTORS.OpenNoteDeposited,
+    caller: EKUBO_SWAP_ANONYMIZER_ADDRESS,
+    token: TOKEN_IN,
+    data: ["0xee6b280"],
   });
   // A verified Ekubo Core swap using another destination is not STRK20
   // private volume and must remain excluded.
@@ -133,6 +142,7 @@ test("Ekubo volume is the outbound value sent to its dedicated anonymizer", () =
   );
   insertVerifiedEkubo.run(CHAIN, "0xekubo-public-route", "2026-08-31");
 
+  materializeEkuboPrivateSwaps(db, CHAIN, POOL);
   const result = routedVolume(db, CHAIN, POOL);
   const day = result.days.find((d) => d.date === "2026-08-31");
 

@@ -3,11 +3,10 @@ import {
   EVENT_SELECTORS,
   lookupToken,
   applyDecimals,
-  EKUBO_SWAP_ANONYMIZER_ADDRESS,
   normalizeHex,
   protocolForAddress,
 } from "@strk20/core";
-import { verifiedSwapsByTx } from "./venue-swaps.js";
+import { swapVolumeByToken } from "./swap-by-token.js";
 import { classifyRoundTrip } from "./window.js";
 
 /**
@@ -16,19 +15,15 @@ import { classifyRoundTrip } from "./window.js";
  * OpenNoteDeposited of token B in the same tx), plus explicitly registered
  * one-way anonymizer withdrawals, are attributed to the protocol they route
  * through and valued on their OUT leg:
- *   - swap  → AVNU uses venue-verification and the venue-reported size,
- *             falling back to the withdrawal leg.
- *   - Ekubo → a Withdrawal sent to its dedicated STRK20 anonymizer. The
- *             shipped flow is one-way at the pool boundary, so the anonymizer
- *             destination itself is the authoritative attribution signal.
+ *   - swaps → AVNU and Ekubo use the same token-leg dataset as the private
+ *             swap chart. This keeps venue cards, charts and totals aligned.
  *   - lend  → vesu        (wrap convention, see classifyRoundTrip)
  *   - stake → endur
  *   - prediction market → offmarket, when a Withdrawal is sent to one of
  *             OFFMARKET's registered anonymizers. Only the outbound value is
  *             counted: adding the later inbound settlement would count the
  *             same private position twice.
- * Unverified swaps (no venue event in the receipt) are not counted — same
- * floor-not-census basis as lifetime-conversions, so totals agree.
+ * Unverified swaps are not counted.
  */
 
 export interface RoutedVolumeDay {
@@ -80,7 +75,6 @@ export function routedVolume(db: Db, chain: string, pool: string): RoutedVolume 
     outs: Set<string>;
     ins: Set<string>;
     outUsd: number;
-    ekuboOutUsd: number;
     offmarketOutUsd: number;
   }
   const byTx = new Map<string, TxAcc>();
@@ -93,7 +87,6 @@ export function routedVolume(db: Db, chain: string, pool: string): RoutedVolume 
         outs: new Set(),
         ins: new Set(),
         outUsd: 0,
-        ekuboOutUsd: 0,
         offmarketOutUsd: 0,
       };
       byTx.set(r.tx_hash, e);
@@ -107,12 +100,6 @@ export function routedVolume(db: Db, chain: string, pool: string): RoutedVolume 
           const data = JSON.parse(r.data_json) as string[];
           const usd = applyDecimals(BigInt(data[3] ?? "0x0"), meta.decimals) * meta.usdApprox;
           e.outUsd += usd;
-          if (
-            r.topic1 &&
-            normalizeHex(r.topic1) === normalizeHex(EKUBO_SWAP_ANONYMIZER_ADDRESS)
-          ) {
-            e.ekuboOutUsd += usd;
-          }
           if (r.topic1 && protocolForAddress(r.topic1) === "offmarket") {
             e.offmarketOutUsd += usd;
           }
@@ -125,7 +112,6 @@ export function routedVolume(db: Db, chain: string, pool: string): RoutedVolume 
     }
   }
 
-  const verified = verifiedSwapsByTx(db, chain);
   const byDay = new Map<string, Map<string, number>>(); // day → protocol → usd
   const add = (day: string, proto: string, usd: number) => {
     if (!(usd > 0)) return;
@@ -134,15 +120,15 @@ export function routedVolume(db: Db, chain: string, pool: string): RoutedVolume 
     m.set(proto, (m.get(proto) ?? 0) + usd);
   };
 
-  for (const [tx, e] of byTx) {
-    // Ekubo's dedicated STRK20 anonymizer receives the private swap input
-    // directly from the pool. Count that outbound value once. Do not require a
-    // same-tx return deposit/Core receipt: production activity shows this flow
-    // is one-way at the privacy-pool boundary.
-    if (e.ekuboOutUsd > 0) {
-      add(e.day, "ekubo", e.ekuboOutUsd);
-      continue;
-    }
+  // Seed private swap venues from the canonical per-swap dataset. In
+  // particular, Ekubo is no longer a current-price estimate of withdrawals;
+  // it uses the exact anonymizer input/output legs and historical pricing.
+  const privateSwaps = swapVolumeByToken(db, chain, pool);
+  for (const day of privateSwaps.days) {
+    for (const [venue, usd] of Object.entries(day.byVenue)) add(day.date, venue, usd);
+  }
+
+  for (const e of byTx.values()) {
     // OFFMARKET's public comparator is trading volume, so count the funds
     // sent from the pool into its anonymizer and do not add the later return
     // deposit. A directly attributed transaction also wins over the generic
@@ -154,15 +140,6 @@ export function routedVolume(db: Db, chain: string, pool: string): RoutedVolume 
     const kind = classifyRoundTrip(e.outs, e.ins);
     if (kind === "lend") add(e.day, LEND_PROTOCOL, e.outUsd);
     else if (kind === "stake") add(e.day, STAKE_PROTOCOL, e.outUsd);
-    else if (kind === "swap") {
-      const v = verified.get(tx);
-      if (!v) continue; // unverified swap — not counted
-      const venue = (v.venue || "swap").toLowerCase();
-      // Ekubo is counted only by its dedicated anonymizer branch above. Core
-      // swaps without that route are public/unattributed, not private volume.
-      if (venue === "ekubo") continue;
-      add(e.day, venue, v.usd ?? e.outUsd);
-    }
   }
 
   if (byDay.size === 0) return { days: [], protocols: [...BASE_PROTOCOLS] };

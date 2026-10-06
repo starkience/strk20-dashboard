@@ -43,4 +43,47 @@ test("values a swap at the price when it was recorded, not the price today", () 
 
   const result = swapVolumeByToken(db, CHAIN, POOL);
   assert.equal(result.totalUsd, 100);
+  assert.equal(result.totalsByVenue.avnu, 100);
+});
+
+test("counts Ekubo ZEC/USDC in both directions from the stablecoin leg", () => {
+  const db = openCache(":memory:");
+  const zec = freshToken(8);
+  const usdc = freshToken(6);
+  registerToken({
+    address: zec,
+    symbol: "ZEC",
+    name: "Zcash",
+    decimals: 8,
+    usdApprox: 150,
+    coingeckoId: null,
+  });
+  registerToken({
+    address: usdc,
+    symbol: "USDC",
+    name: "USD Coin",
+    decimals: 6,
+    usdApprox: 1,
+    coingeckoId: null,
+  });
+
+  const insert = db.prepare(`
+    INSERT INTO venue_swaps
+      (chain, tx_hash, evt_index, day, venue,
+       sell_token, sell_amount, buy_token, buy_amount, sell_usd, buy_usd)
+    VALUES (?, ?, 0, '2026-10-01', 'ekubo', ?, ?, ?, ?, ?, ?)
+  `);
+  // Current ZEC valuation differs intentionally. The stable amount is the
+  // deterministic USD notional of each trade.
+  insert.run(CHAIN, "0xzec-sell", zec, String(10n ** 8n), usdc, String(90n * 10n ** 6n), 150, 90);
+  insert.run(CHAIN, "0xzec-buy", usdc, String(80n * 10n ** 6n), zec, String(10n ** 8n), 80, 150);
+
+  const result = swapVolumeByToken(db, CHAIN, POOL);
+  const day = result.days.find((d) => d.date === "2026-10-01");
+
+  assert.equal(result.totalUsd, 170);
+  assert.equal(result.totalsByVenue.ekubo, 170);
+  assert.equal(result.swapCountByVenue.ekubo, 2);
+  assert.equal(day?.byToken.ZEC, 170);
+  assert.equal(day?.byVenue.ekubo, 170);
 });
