@@ -97,8 +97,9 @@ dedicated long-running server or a scheduled function — see notes below.)
 - **pnpm** — the workspace uses the `workspace:*` protocol (npm/yarn won't resolve it).
 
 TVL (the most live metric) comes from Starkscan's finalized Privacy Pool
-public-flow snapshot and its explorer market quotes, with a 60s server-side
-cache. On-chain balance and local event reconstruction are outage fallbacks.
+public-flow snapshot and prepared asset valuations, with a 60s server-side
+cache. Its metric series supply the charts. No onchain or local accounting
+fallback replaces an unavailable Starkscan snapshot.
 
 ## Address book curation (important before launch)
 
@@ -114,9 +115,10 @@ To curate:
 
 ## Pricing
 
-Current address-keyed prices refresh from the same Starkscan market endpoints
-used by `starkscan.co/privacy-pool`. A token Starkscan leaves unpriced is also
-left unpriced here; stale values from another provider are never added to TVL.
+TVL uses prepared valuations from `starkscan.co/v1/SN_MAIN/privacy-pool/tvl`.
+A token Starkscan leaves unpriced is excluded from the USD subtotal. Other
+metrics continue to refresh address-keyed prices from Starkscan market feeds;
+those feeds never override the TVL snapshot valuations.
 CoinGecko is retained only for historical daily swap-price backfills.
 
 ## What's not yet built

@@ -53,8 +53,11 @@ falls back to `http://localhost:8787` for local dev.
 
 - First boot backfills ~12k events (a few minutes). The dashboard
   serves partial numbers until `backfillComplete`.
-- Current TVL amounts come from Starkscan's authenticated finalized Privacy
-  Pool snapshot. USD values use the same address-keyed market quotes as the
-  Starkscan explorer; local on-chain/event reconstruction is outage-only.
+- TVL amounts and USD values come from the public finalized Privacy Pool
+  snapshot used by Starkscan's explorer. Charts use its per-token metric
+  series and snapshot valuations. No alternate accounting or price feed is
+  used when Starkscan is unavailable; the request fails and the client keeps
+  its last Starkscan value. `STARKSCAN_EXPLORER_BASE_URL` can override the
+  default `https://starkscan.co` for testing.
 - Costs: hobby plan ~$5/mo covers this comfortably (one small service
   + 1 GB volume).

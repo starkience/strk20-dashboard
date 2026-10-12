@@ -37,9 +37,8 @@ import { currentTvl } from "./aggregations/tvl.js";
 import { activeProtocols, topCallers } from "./aggregations/protocols.js";
 import { windowStats, windowConversions } from "./aggregations/window.js";
 import { lifetimeConversions } from "./aggregations/lifetime-conversions.js";
-import { tvlHistory } from "./aggregations/tvl-history.js";
+import { starkscanTvlHistory } from "./services/starkscan-tvl-history.js";
 import { volumeHistory } from "./aggregations/volume-history.js";
-import { shieldedBalance } from "./aggregations/shielded-balance.js";
 import { routedVolume } from "./aggregations/routed-volume.js";
 import { swapVolumeByToken } from "./aggregations/swap-by-token.js";
 import { actionsByProtocol } from "./aggregations/actions-by-protocol.js";
@@ -203,66 +202,18 @@ export function createHandlers(deps: HandlerDeps) {
       return result;
     },
 
-    /** Daily TVL from Starkscan-indexed flows, with today's endpoint pinned to
-     *  Starkscan's finalized Privacy Pool snapshot. Cached 60s. */
+    /** Daily TVL and per-token stacks share Starkscan's own historical series. */
     async tvlHistory() {
       const tvl = await currentTvl(starkscan, db, views, tokenMeta, avnu, chain, pool);
-      const key = `tvl-history:v3:${chain}:${pool}`;
-      let history = views.get<ReturnType<typeof tvlHistory>>(key);
-      if (!history) {
-        history = tvlHistory(db, chain, pool);
-        views.put(key, history, 60_000);
-      }
-      // Cache the expensive historical reconstruction, never the live tail.
-      // A new response is pinned to the shared current-TVL snapshot every time.
-      const days = [...history.days];
-      const last = days[days.length - 1];
-      if (last) days[days.length - 1] = { ...last, tvlUsd: tvl.totalUsd };
-      const result = {
-        ...history,
-        days,
-        source: "starkscan-events+starkscan-finalized",
-        tvlSource: tvl.tvlSource,
-        tvlAsOf: tvl.tvlAsOf,
-        tvlAsOfBlock: tvl.tvlAsOfBlock,
-      };
-      return result;
+      const history = await starkscanTvlHistory(tvl, views, chain);
+      return { ...history, days: history.days.map((d) => ({
+        date: d.date, tvlUsd: d.total, feesUsd: d.feesUsd,
+      })) };
     },
 
-    /** Per-token shielded balance, daily — the breakdown behind tvl-history.
-     *  Drives the Shielded Balance stacked-bar chart (with hover totals).
-     *  Today's stack is pinned to Starkscan's finalized snapshot. Cached 60s. */
     async shieldedBalance() {
       const tvl = await currentTvl(starkscan, db, views, tokenMeta, avnu, chain, pool);
-      const key = `shielded-balance:v3:${chain}:${pool}`;
-      let history = views.get<ReturnType<typeof shieldedBalance>>(key);
-      if (!history) {
-        history = shieldedBalance(db, chain, pool);
-        views.put(key, history, 60_000);
-      }
-      const days = [...history.days];
-      const last = days[days.length - 1];
-      let tokens = [...history.tokens];
-      if (last) {
-        const byToken: Record<string, number> = {};
-        for (const token of tvl.perToken) {
-          if (token.balanceUsd <= 0) continue;
-          byToken[token.symbol] = (byToken[token.symbol] ?? 0) + token.balanceUsd;
-        }
-        days[days.length - 1] = { ...last, total: tvl.totalUsd, byToken };
-        const latest = Object.keys(byToken).sort((a, b) => byToken[b]! - byToken[a]!);
-        tokens = [...latest, ...history.tokens.filter((symbol) => !(symbol in byToken))];
-      }
-      const result = {
-        ...history,
-        days,
-        tokens,
-        source: "starkscan-events+starkscan-finalized",
-        tvlSource: tvl.tvlSource,
-        tvlAsOf: tvl.tvlAsOf,
-        tvlAsOfBlock: tvl.tvlAsOfBlock,
-      };
-      return result;
+      return starkscanTvlHistory(tvl, views, chain);
     },
 
     /** Privately routed volume by protocol (avnu/ekubo/vesu…), daily.
@@ -449,10 +400,10 @@ export function createHandlers(deps: HandlerDeps) {
           const t = await currentTvl(starkscan, db, views, tokenMeta, avnu, chain, pool);
           return {
             totalUsd: t.totalUsd,
-            perToken: t.perToken.map((p) => ({
+            perToken: t.perToken.filter((p) => p.decimals != null).map((p) => ({
               address: p.address,
               symbol: p.symbol,
-              decimals: p.decimals,
+              decimals: p.decimals!,
               balanceUsd: p.balanceUsd,
               priced: p.priced,
             })),

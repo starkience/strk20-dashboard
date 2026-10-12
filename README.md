@@ -60,10 +60,10 @@ import {
 
 ## Data source
 
-Current TVL mirrors Starkscan: the authenticated Privacy Pool TVL endpoint is
-the source for finalized token amounts and counts, and Starkscan's explorer
-market feed supplies the address-keyed USD quotes. The balance/event-derived
-calculation is used only when that authoritative snapshot is unavailable.
+TVL uses the finalized amounts and prepared asset valuations from the same
+public snapshot as Starkscan's Privacy Pool page. The line and token breakdown
+use its per-token metric series. Unpriced assets are excluded from the USD
+subtotal; an unavailable source never triggers alternate TVL accounting.
 
 ## Before launch (curation tasks)
 

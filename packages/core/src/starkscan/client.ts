@@ -86,9 +86,8 @@ export interface ContractEntrypointsResponse {
 /**
  * Supported accounting payload from Starkscan's Privacy Pool API.
  *
- * Raw amounts and address-keyed metadata are the integration contract. The
- * deprecated valuation fields returned by Starkscan are deliberately omitted:
- * callers must price these amounts independently.
+ * Finalized amounts and prepared asset valuations mirror the explorer.
+ * Unpriced assets are omitted from the USD subtotal.
  */
 export interface PrivacyPoolTvlToken {
   address: string;
@@ -112,6 +111,12 @@ export interface PrivacyPoolTvlAsset {
   protectedAmountRaw: string;
   protectedAmount: string | null;
   missingAmountEventCount: number;
+  price?: {
+    status: "priced" | "unavailable";
+    priceUsd: string | null;
+    source: string | null;
+  };
+  valueUsd?: string | null;
 }
 
 export interface PrivacyPoolTvlResponse {
