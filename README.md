@@ -69,3 +69,24 @@ subtotal; an unavailable source never triggers alternate TVL accounting.
 
 - Curate protocol addresses in `packages/core/src/protocols/addresses.ts` (use `/agg/top-callers` for empirical discovery)
 - Set up periodic `POST /sync` cron to keep the event cache fresh
+
+### Troves shadow-account activity
+
+`GET /agg/troves-shadow-activity` reports finalized private vault transaction counts,
+active shadow-account counts, daily counts, and deposit/withdrawal/request/claim
+**event** counts. Transactions are deduplicated across vault events; shadow accounts
+are pseudonymous accounts, not unique people. No private TVL or dollar volume is inferred.
+
+The index discovers accounts from `ShadowAccountDeployed` on the mainnet shared
+anonymizer `0x04f33230dc57855c6e7eabe66dfa0fde82c5458fd0e54827cdb7cb4c474888a7`.
+It matches position owners (or claim recipients) in vaults listed by
+https://app.troves.fi/api/strategies. Public-account activity is excluded. The catalogue
+currently has 38 vaults; strategies without a vault contract are listed under
+`excludedStrategyIds`. Retired vaults remain indexed after catalogue removal.
+
+Starkscan provides the raw events, finalized block bound, and ABI decoding. Exact
+legacy Cairo layouts from Troves's public indexer/mainnet ABIs handle `name_only`
+events. Unrecognized layouts produce `partial` coverage, never a claimed zero.
+The independent cursor store resumes fixed finalized block ranges across restarts.
+Clients should show numeric values only when `status` is `live`; `indexing`,
+`partial`, and `stale` preserve the distinction between zero and unavailable coverage.

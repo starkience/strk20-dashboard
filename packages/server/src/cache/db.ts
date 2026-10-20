@@ -109,6 +109,23 @@ CREATE TABLE IF NOT EXISTS wallet_classes (
   PRIMARY KEY (chain, address)
 );
 
+-- Independent, resumable shadow-account activity index. It never changes pool TVL.
+CREATE TABLE IF NOT EXISTS shadow_index_state (
+  key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS shadow_accounts (
+  chain TEXT NOT NULL, address TEXT NOT NULL, deployed_block INTEGER NOT NULL,
+  tx_hash TEXT NOT NULL, PRIMARY KEY(chain, address)
+);
+CREATE TABLE IF NOT EXISTS shadow_vault_events (
+  chain TEXT NOT NULL, vault TEXT NOT NULL, block_number INTEGER NOT NULL,
+  tx_index INTEGER NOT NULL, log_index INTEGER NOT NULL, tx_hash TEXT NOT NULL,
+  timestamp_iso TEXT NOT NULL, kind TEXT NOT NULL, account TEXT,
+  PRIMARY KEY(chain, vault, block_number, tx_index, log_index)
+);
+CREATE INDEX IF NOT EXISTS idx_shadow_vault_events_account
+  ON shadow_vault_events(chain, account, block_number);
+
 CREATE TABLE IF NOT EXISTS view_cache (
   key         TEXT PRIMARY KEY,
   value_json  TEXT NOT NULL,

@@ -14,6 +14,7 @@ import { StarkscanClient } from "@strk20/core";
 import { openCache, EventCache, ViewCache } from "./cache/index.js";
 import { HeartbeatCache } from "./cache/heartbeats.js";
 import { createHandlers } from "./handlers.js";
+import { startTrovesShadowSync, trovesShadowActivity } from "./services/troves-shadow.js";
 import { startTokenSync } from "./services/token-sync.js";
 import { startVenueVerify } from "./services/venue-verify.js";
 import { startWalletClassify } from "./services/wallet-classify.js";
@@ -74,6 +75,7 @@ app.get("/agg/lifetime-revenue", async (c) => c.json(await h.lifetimeRevenue()))
 app.get("/agg/lifetime-conversions", async (c) => c.json(await h.lifetimeConversions()));
 app.get("/agg/tvl-history", async (c) => c.json(await h.tvlHistory()));
 app.get("/agg/shielded-balance", async (c) => c.json(await h.shieldedBalance()));
+app.get("/agg/troves-shadow-activity", (c) => c.json(trovesShadowActivity(db, CHAIN)));
 app.get("/agg/routed-volume", async (c) => c.json(await h.routedVolume()));
 app.get("/agg/swap-by-token", async (c) => c.json(await h.swapVolumeByToken()));
 app.get("/agg/actions-by-protocol", async (c) => c.json(await h.actionsByProtocol()));
@@ -190,6 +192,8 @@ async function runAutoSync() {
 }
 
 runAutoSync().catch((e) => console.error("auto-sync failed:", e));
+
+startTrovesShadowSync({db, client:starkscan, chain:CHAIN});
 
 // Token discovery + live USD pricing (Starkscan metadata and explorer quotes).
 startTokenSync({ db, starkscan, chain: CHAIN, pool: POOL });

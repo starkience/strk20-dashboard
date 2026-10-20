@@ -54,6 +54,10 @@ export interface RawContractEvent {
   topic2: string | null;
   topic3: string | null;
   data: string[];
+  /** Rich event decoding supplied by Starkscan's class ABI materializer. */
+  keys?: string[];
+  eventName?: string | null;
+  decodedFields?: { label: string; status: string; kind?: string; addressValue?: string | null }[];
 }
 
 export interface ContractEventsResponse {
@@ -214,15 +218,33 @@ export class StarkscanClient {
 
   async contractEvents(
     address: string,
-    opts: { limit?: number; cursor?: string | null } = {}
+    opts: { limit?: number; cursor?: string | null; fromBlock?: number; toBlock?: number; topic0?: string } = {}
   ): Promise<ContractEventsResponse> {
     const params = new URLSearchParams();
     if (opts.limit) params.set("limit", String(opts.limit));
     if (opts.cursor) params.set("cursor", opts.cursor);
+    if (opts.fromBlock != null) params.set("from_block", String(opts.fromBlock));
+    if (opts.toBlock != null) params.set("to_block", String(opts.toBlock));
+    if (opts.topic0) params.set("topic0", opts.topic0);
     const qs = params.toString();
     return this.get<ContractEventsResponse>(
       `/v1/${this.chain}/contract/${address}/events${qs ? `?${qs}` : ""}`
     );
+  }
+
+  /** Raw finalized-range events across a curated set of vault contracts. */
+  async globalEvents(opts: {
+    addresses: string[]; topics: string[]; fromBlock: number; toBlock: number;
+    cursor?: string | null; limit?: number;
+  }): Promise<ContractEventsResponse> {
+    const params = new URLSearchParams();
+    for (const address of opts.addresses) params.append("address", address);
+    for (const topic of opts.topics) params.append("topic0", topic);
+    params.set("from_block", String(opts.fromBlock));
+    params.set("to_block", String(opts.toBlock));
+    params.set("limit", String(opts.limit ?? 100));
+    if (opts.cursor) params.set("cursor", opts.cursor);
+    return this.get<ContractEventsResponse>(`/v1/${this.chain}/events?${params}`);
   }
 
   /**

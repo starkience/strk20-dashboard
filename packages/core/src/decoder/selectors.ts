@@ -21,7 +21,7 @@ export const EVENT_NAMES = [
 
 export type EventName = (typeof EVENT_NAMES)[number];
 
-function selectorOf(name: string): string {
+export function selectorOf(name: string): string {
   // hash.getSelectorFromName already masks to 250 bits per Starknet event-selector spec.
   return normalizeHex(hash.getSelectorFromName(name));
 }

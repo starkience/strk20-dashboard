@@ -5,6 +5,7 @@ export {
   OZ_SELECTORS,
   SELECTOR_TO_NAME,
   normalizeHex,
+  selectorOf,
   type EventName,
 } from "./selectors.js";
 export type {
