@@ -53,7 +53,9 @@ export function vaultStreamKey(chain: string, vaults: Vault[]): string {
   return `troves:vaults:${chain}:${createHash("sha256").update(addresses.join(",")).digest("hex").slice(0,16)}`;
 }
 export function vaultTransferStreamKey(chain: string, vaults: Vault[]): string {
-  return vaultStreamKey(chain, vaults).replace("troves:vaults:", "troves:share-transfers:");
+  // v2 persists every recipient, including deterministic shadow addresses
+  // that have not been deployed when the transfer is first indexed.
+  return vaultStreamKey(chain, vaults).replace("troves:vaults:", "troves:share-transfers-v2:");
 }
 
 /** A fixed finalized upper bound survives every cursor-resume tick.
@@ -168,19 +170,15 @@ export function recordVaultActivity(db: Db, chain: string, e: RawContractEvent):
 }
 
 /** A received share can be the only evidence of a shadow-owned position.
- * Index ERC20 Transfer recipients separately from vault actions so mint
- * events never double-count a deposit in the activity chart.
+ * Keep every recipient because a pre-funded deterministic address may be
+ * deployed after its transfer has already passed the index cursor. Transfer
+ * events never enter vault action counts.
  */
 export function recordVaultShareTransfer(db: Db, chain: string, e: RawContractEvent): void {
   if (normalizeHex(e.topic0) !== TRANSFER_TOPIC || e.keys?.length !== 3 || e.data.length !== 2 || !e.topic2) {
     throw Error("Invalid Troves share Transfer event");
   }
   const recipient = normalizeHex(e.topic2);
-  const owner = db.prepare("SELECT deployed_block FROM shadow_accounts WHERE chain=? AND address=?")
-    .get(chain, recipient) as {deployed_block:number}|undefined;
-  // A deterministic shadow address can receive shares before its deployment.
-  // Current balance still belongs to that shadow once deployment is finalized.
-  if (!owner) return;
   db.prepare(`INSERT INTO shadow_vault_events(chain,vault,block_number,tx_index,log_index,tx_hash,timestamp_iso,kind,account)
     VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(chain,vault,block_number,tx_index,log_index) DO NOTHING`)
     .run(chain, normalizeHex(e.address), e.blockNumber, e.txIndex, e.logIndex,

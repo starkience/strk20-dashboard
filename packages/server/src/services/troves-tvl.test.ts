@@ -83,10 +83,10 @@ test("Troves values shares sent before shadow deployment without a vault Deposit
     saveState(db, `troves:factory:${chain}`, state);
     saveState(db, vaultStreamKey(chain,catalogue.vaults), state);
     saveState(db, vaultTransferStreamKey(chain,catalogue.vaults), state);
-    db.prepare("INSERT INTO shadow_accounts(chain,address,deployed_block,tx_hash) VALUES(?,?,?,?)").run(chain,account,10,"0x1");
     recordVaultShareTransfer(db,chain,{address:vault,blockNumber:5,txIndex:0,logIndex:0,txHash:"0x2",
       timestampIso:"2026-10-27T10:00:00Z",topic0:selectorOf("Transfer"),topic1:"0xdef",topic2:account,topic3:null,
       keys:[selectorOf("Transfer"),"0xdef",account],data:["0x1","0x0"]});
+    db.prepare("INSERT INTO shadow_accounts(chain,address,deployed_block,tx_hash) VALUES(?,?,?,?)").run(chain,account,10,"0x1");
     const client = {status:async()=>({finalizedBlockNumber:100,latestIndexedBlockNumber:100}),
       contractRead:async(_vault:string,_selector:string,opts:{calldata?:string[]})=>({result:opts.calldata?["0xa","0x0"]:["0x64","0x0"]})};
     const fetchImpl=async()=>Response.json({status:true,strategies:[{contract:[{name:"Vault",address:vault}],tvlUsd:1000}]});
