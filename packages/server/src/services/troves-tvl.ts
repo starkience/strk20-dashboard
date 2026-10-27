@@ -1,6 +1,8 @@
 /** Current Troves TVL held by shadow accounts observed in the finalized vault index.
- * Values each account's vault shares against the same vault's Troves TVL, so
- * the public and private rows are disjoint and use one valuation source.
+ * Stablecoin vaults use finalized total_assets and a recent token quote. The
+ * strategy catalogue can lag a new deposit even after the shares are minted.
+ * Other vaults use Troves' own USD TVL because their assets need a strategy
+ * valuation (not just a spot token quote).
  */
 import { normalizeHex, selectorOf, type StarkscanClient } from "@strk20/core";
 import type { Db } from "../cache/db.js";
@@ -9,6 +11,8 @@ import { readState, trovesShadowActivity, type Vault } from "./troves-shadow.js"
 const CATALOGUE_URL = "https://app.troves.fi/api/strategies";
 const REFRESH_MS = 120_000;
 const STALE_MS = 10 * 60_000;
+const PRICE_STALE_MS = 10 * 60_000;
+const STABLE_SYMBOLS = new Set(["USDC", "USDC.E", "USDT"]);
 type Reader = Pick<StarkscanClient, "status" | "contractRead">;
 type Values = { public: number; private: number; observedAccounts: number; trackedVaults: number; asOfBlock: number };
 
@@ -26,9 +30,13 @@ export async function measureTrovesTvl(opts: { db: Db; client: Reader; chain: st
   if (!stored?.vaults.length) throw Error("Troves vault catalogue unavailable");
   const response = await (opts.fetchImpl ?? fetch)(CATALOGUE_URL, { signal: AbortSignal.timeout(20_000) });
   if (!response.ok) throw Error(`Troves catalogue HTTP ${response.status}`);
-  const body = await response.json() as { status?: boolean; strategies?: { contract?: { name: string; address: string }[]; tvlUsd?: number }[] };
+  const body = await response.json() as { status?: boolean; strategies?: {
+    contract?: { name: string; address: string }[]; tvlUsd?: number;
+    depositToken?: { symbol: string; address: string; decimals: number }[];
+  }[] };
   if (body.status !== true || !Array.isArray(body.strategies)) throw Error("Invalid Troves catalogue");
   const tvl = new Map<string, number>();
+  const stableVaults: {vault: string; token: string; decimals: number}[] = [];
   for (const strategy of body.strategies) {
     const vault = strategy.contract?.find((c) => c.name === "Vault");
     if (!vault) continue;
@@ -37,10 +45,15 @@ export async function measureTrovesTvl(opts: { db: Db; client: Reader; chain: st
       throw Error("Invalid Troves vault TVL");
     }
     tvl.set(address, strategy.tvlUsd);
+    const tokens = strategy.depositToken;
+    if (tokens?.length === 1 && STABLE_SYMBOLS.has(tokens[0]!.symbol?.toUpperCase())) {
+      const token = tokens[0]!;
+      if (!Number.isInteger(token.decimals) || token.decimals < 0 || token.decimals > 36) throw Error("Invalid Troves stablecoin decimals");
+      stableVaults.push({vault: address, token: normalizeHex(token.address), decimals: token.decimals});
+    }
   }
   const allowed = new Set(stored.vaults.map((v) => normalizeHex(v.address)));
   if (!allowed.size || [...allowed].some((address) => !tvl.has(address))) throw Error("Troves catalogue does not cover indexed vaults");
-  const total = [...allowed].reduce((sum, address) => sum + tvl.get(address)!, 0);
   const holders = opts.db.prepare(`SELECT DISTINCT v.vault, v.account FROM shadow_vault_events v
     JOIN shadow_accounts a ON a.chain=v.chain AND a.address=v.account AND a.deployed_block<=v.block_number
     WHERE v.chain=? AND v.block_number<=? AND v.kind!='undecoded' AND v.account IS NOT NULL`).all(opts.chain, activity.asOfBlock) as {vault:string;account:string}[];
@@ -49,6 +62,22 @@ export async function measureTrovesTvl(opts: { db: Db; client: Reader; chain: st
   const head = Math.min(status.finalizedBlockNumber, status.latestIndexedBlockNumber);
   if (!Number.isSafeInteger(head) || head < activity.asOfBlock) throw Error("Troves finalized share snapshot unavailable");
   const blockTag = String(head);
+  // A catalogue TVL and an onchain share supply from different moments make
+  // a fresh deposit appear worth less until Troves' API refreshes. For the
+  // one-asset stablecoin vaults, value finalized assets directly instead.
+  for (const {vault, token, decimals} of stableVaults) {
+    if (!allowed.has(vault)) continue;
+    const price = opts.db.prepare("SELECT usd,updated_at FROM token_prices WHERE address=?")
+      .get(token) as {usd:number;updated_at:number}|undefined;
+    if (!price || !Number.isFinite(price.usd) || price.usd <= 0 || Date.now() - price.updated_at > PRICE_STALE_MS) {
+      throw Error("Troves stablecoin quote unavailable");
+    }
+    const assets = uint256((await opts.client.contractRead(vault, selectorOf("total_assets"), { blockTag })).result);
+    const usd = Number(assets) / 10 ** decimals * price.usd;
+    if (!Number.isFinite(usd) || usd < 0) throw Error("Invalid Troves onchain stablecoin TVL");
+    tvl.set(vault, usd);
+  }
+  const total = [...allowed].reduce((sum, address) => sum + tvl.get(address)!, 0);
   const grouped = new Map<string, Set<string>>();
   for (const row of holders) {
     const vault = normalizeHex(row.vault);

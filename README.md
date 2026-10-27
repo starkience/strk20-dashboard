@@ -126,13 +126,26 @@ protocol TVL reported by DefiLlama. It is not added to the daily flow chart.
 
 `GET /agg/troves-shadow-tvl` values observed STRK20 shadow-account vault
 positions. It reads each observed account's finalized vault share balance and
-the vault's total share supply, then applies that fraction to the same vault's
-USD TVL in [Troves's strategy catalogue](https://app.troves.fi/api/strategies).
+the vault's total share supply. Single-asset USDC/USDC.e/USDT vaults use
+finalized `total_assets` and a current address-keyed token quote; this avoids
+undervaluing a newly minted position while Troves's catalogue TVL lags.
+Other vaults use the USD TVL in
+[Troves's strategy catalogue](https://app.troves.fi/api/strategies), because
+their strategy assets need more than a spot-token quote.
 The public row is the catalogue's tracked-vault TVL less the observed private
 slice. The current scope includes shadow accounts seen in indexed Troves vault
 activity; positions acquired solely by share transfer are not yet attributed.
 The separate `/agg/troves-shadow-activity` endpoint supplies daily vault action
 counts. TVL is a current stock, so it does not belong in a daily volume chart.
+
+`GET /agg/endur-shadow-tvl` reports a matched current TVL split for Endur.
+It values Endur liquid staking tokens held by the STRK20 pool from a finalized
+pool balance and current address-keyed market quotes. That balance is the
+private row; the public row subtracts it from Endur protocol TVL reported by
+DefiLlama. It excludes Endur positions held outside the STRK20 pool, and it
+does not use cumulative routed staking volume as a TVL proxy. Missing or stale
+source values make the split unavailable rather than silently treating an
+unpriced position as zero.
 
 The endpoint serves no numeric value until it has a complete read from each
 source and the shadow deployment history. Values age out after ten minutes if a
