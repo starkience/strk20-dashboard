@@ -24,6 +24,7 @@ export interface AppFlowMetric {
   public: number | null;
   private: number | null;
   asOf: string | null;
+  privateDays: { date: string; value: number }[] | null;
 }
 type Values = Omit<AppFlowMetric, "status" | "asOf">;
 type ShadowAccount = { block: number; deployedAt: number };
@@ -53,6 +54,15 @@ function number(value: unknown): number {
 function shadowAtTime(shadows: ShadowMap, actor: unknown, timeMs: number): boolean {
   const deployed = shadows.get(address(actor));
   return deployed != null && deployed.deployedAt <= timeMs;
+}
+
+function daily(map: Map<string, number>): { date: string; value: number }[] {
+  return [...map].sort(([a], [b]) => a.localeCompare(b)).map(([date, value]) => ({ date, value }));
+}
+function addDay(map: Map<string, number>, iso: string, amount: number): void {
+  const date = iso.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw Error("Invalid app-flow day");
+  map.set(date, (map.get(date) ?? 0) + amount);
 }
 
 async function allEvents(client: EventsClient, contract: string, topic0: string, head: number): Promise<RawContractEvent[]> {
@@ -113,13 +123,14 @@ export async function opusPositionActions(client: EventsClient, head: number, sh
     owners.set(id, { actor, openedBlock: event.blockNumber });
   }
   let publicActions = 0, privateActions = 0;
-  const count = (actor: string, block: number) => {
+  const privateDays = new Map<string, number>();
+  const count = (actor: string, block: number, iso: string) => {
     const deployment = shadows.get(actor);
-    if (deployment && deployment.block <= block) privateActions++;
+    if (deployment && deployment.block <= block) { privateActions++; addDay(privateDays, iso, 1); }
     else publicActions++;
   };
   for (const event of [...deposits, ...withdrawals]) {
-    count(address(event.topic1), event.blockNumber);
+    count(address(event.topic1), event.blockNumber, event.timestampIso);
   }
   for (const event of [...forged, ...repaid]) {
     const trove = address(event.topic1);
@@ -128,9 +139,9 @@ export async function opusPositionActions(client: EventsClient, head: number, sh
     // Abbot's ownership record for the same Trove ID. Their actor cannot be
     // verified, so they belong in neither displayed slice.
     if (!owner || owner.openedBlock > event.blockNumber) continue;
-    count(owner.actor, event.blockNumber);
+    count(owner.actor, event.blockNumber, event.timestampIso);
   }
-  return { unit: "actions", basis: "finalized, owner-attributed Opus collateral and CASH debt actions", public: publicActions, private: privateActions };
+  return { unit: "actions", basis: "finalized, owner-attributed Opus collateral and CASH debt actions", public: publicActions, private: privateActions, privateDays: daily(privateDays) };
 }
 
 async function getJson(fetchImpl: typeof fetch, url: string): Promise<unknown> {
@@ -143,6 +154,7 @@ export async function arcxTradeVolume(fetchImpl: typeof fetch, shadows: ShadowMa
   const markets = await getJson(fetchImpl, `${ARCX_API}/ct-markets`);
   if (!Array.isArray(markets) || markets.length === 0) throw Error("ArcX market catalogue unavailable");
   let publicUsd = 0, privateUsd = 0, fills = 0;
+  const privateDays = new Map<string, number>();
   const seenMarkets = new Set<string>();
   for (const market of markets) {
     if (!market || typeof market.id !== "string" || seenMarkets.has(market.id)
@@ -168,7 +180,8 @@ export async function arcxTradeVolume(fetchImpl: typeof fetch, shadows: ShadowMa
         if (!Number.isFinite(usd)) throw Error("Invalid ArcX USDC amount");
         const timeMs = timestamp(fill.createdAt);
         const isPrivate = shadowAtTime(shadows, fill.maker, timeMs) || shadowAtTime(shadows, fill.taker, timeMs);
-        if (isPrivate) privateUsd += usd; else publicUsd += usd;
+        if (isPrivate) { privateUsd += usd; addDay(privateDays, fill.createdAt, usd); }
+        else publicUsd += usd;
         fills++;
       }
       cursor = body.cursor;
@@ -179,7 +192,7 @@ export async function arcxTradeVolume(fetchImpl: typeof fetch, shadows: ShadowMa
     }
   }
   if (fills === 0) throw Error("ArcX fills history unavailable");
-  return { unit: "usd", basis: "ArcX USDC fills, any shadow-account counterparty", public: publicUsd, private: privateUsd };
+  return { unit: "usd", basis: "ArcX USDC fills, any shadow-account counterparty", public: publicUsd, private: privateUsd, privateDays: daily(privateDays) };
 }
 
 export async function supervegaPremiums(fetchImpl: typeof fetch, shadows: ShadowMap): Promise<Values> {
@@ -187,6 +200,7 @@ export async function supervegaPremiums(fetchImpl: typeof fetch, shadows: Shadow
   if (!Array.isArray(activity) || activity.length === 0) throw Error("Supervega activity history unavailable");
   const seen = new Set<string>();
   let publicUsd = 0, privateUsd = 0, buys = 0;
+  const privateDays = new Map<string, number>();
   for (const entry of activity) {
     if (entry?.kind !== "buy") continue;
     if (typeof entry.txHash !== "string" || typeof entry.entryId !== "string") throw Error("Invalid Supervega purchase");
@@ -194,12 +208,12 @@ export async function supervegaPremiums(fetchImpl: typeof fetch, shadows: Shadow
     if (seen.has(key)) continue;
     seen.add(key);
     const usd = number(entry.premiumUsd);
-    if (shadowAtTime(shadows, entry.actor, timestamp(entry.ts))) privateUsd += usd;
+    if (shadowAtTime(shadows, entry.actor, timestamp(entry.ts))) { privateUsd += usd; addDay(privateDays, new Date(timestamp(entry.ts)).toISOString(), usd); }
     else publicUsd += usd;
     buys++;
   }
   if (buys === 0) throw Error("Supervega purchase history unavailable");
-  return { unit: "usd", basis: "Supervega option purchase premiums", public: publicUsd, private: privateUsd };
+  return { unit: "usd", basis: "Supervega option purchase premiums", public: publicUsd, private: privateUsd, privateDays: daily(privateDays) };
 }
 
 export function createAppFlowService(opts: {client: EventsClient; chain: string; fetchImpl?: typeof fetch; now?: () => number}) {
@@ -252,6 +266,7 @@ export function createAppFlowService(opts: {client: EventsClient; chain: string;
         public: fresh ? entry.data.public : null,
         private: fresh ? entry.data.private : null,
         asOf: entry ? new Date(entry.updatedAt).toISOString() : null,
+        privateDays: fresh ? entry.data.privateDays : null,
       };
     }
     return { schemaVersion: 1, scope: "partner-app-public-and-strk20-shadow-flows", apps };

@@ -77,6 +77,7 @@ test("classifies finalized Opus collateral and debt actions by verified Trove ow
   const result = await opusPositionActions(source as never, 100, shadows);
   assert.deepEqual({unit:result.unit, public:result.public, private:result.private},
     {unit:"actions", public:3, private:4});
+  assert.deepEqual(result.privateDays, [{date:"2026-10-21",value:4}]);
 });
 
 test("ArcX paginates and deduplicates fills; Supervega counts purchase premiums only", async () => {
@@ -84,9 +85,11 @@ test("ArcX paginates and deduplicates fills; Supervega counts purchase premiums 
   const arcx = await arcxTradeVolume(mockFetch as typeof fetch, shadows);
   assert.equal(arcx.private, 15);
   assert.equal(arcx.public, 25);
+  assert.deepEqual(arcx.privateDays, [{date:"2026-10-21",value:15}]);
   const supervega = await supervegaPremiums(mockFetch as typeof fetch, shadows);
   assert.equal(supervega.private, 12.5);
   assert.equal(supervega.public, 20);
+  assert.deepEqual(supervega.privateDays, [{date:"2026-10-20",value:12.5}]);
 });
 
 test("failed source never becomes a measured zero and expired figures are hidden", async () => {

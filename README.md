@@ -112,6 +112,20 @@ accounts are public pseudonyms; their app-side actions and amounts remain public
   and every fills cursor. A fill involving either shadow-account counterparty
   belongs to the private slice.
 
+Each app also reports `privateDays`, a daily series in that app's own unit.
+Opus's series is actions; Supervega and ArcX are USD. These different units
+must not be stacked on the same chart axis.
+
+`GET /agg/troves-shadow-tvl` values observed STRK20 shadow-account vault
+positions. It reads each observed account's finalized vault share balance and
+the vault's total share supply, then applies that fraction to the same vault's
+USD TVL in [Troves's strategy catalogue](https://app.troves.fi/api/strategies).
+The public row is the catalogue's tracked-vault TVL less the observed private
+slice. The current scope includes shadow accounts seen in indexed Troves vault
+activity; positions acquired solely by share transfer are not yet attributed.
+The separate `/agg/troves-shadow-activity` endpoint supplies daily vault action
+counts. TVL is a current stock, so it does not belong in a daily volume chart.
+
 The endpoint serves no numeric value until it has a complete read from each
 source and the shadow deployment history. Values age out after ten minutes if a
 source stops responding. App feeds are partner-operated, so a changed response
