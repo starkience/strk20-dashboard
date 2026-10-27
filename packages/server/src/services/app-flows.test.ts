@@ -6,6 +6,9 @@ import { SHADOW_ANONYMIZER, SHADOW_DEPLOYED } from "./troves-shadow.js";
 
 const ABBOT = "0x04d0bb0a4c40012384e7c419e6eb3c637b28e8363fb66958b60d90505b9c072f";
 const SHRINE = "0x0498edfaf50ca5855666a700c25dd629d577eb9afccdf3b5977aec79aee55ada";
+const ABSORBER = "0x000a5e1c1ffe1384b30a464a61b1af631e774ec52c0e7841b9b5f02c6a729bc0";
+const ARCX_REGISTRY = "0x37ad81bcfa789e849216f5ea973c6ac22b5c9cdb05c29e9d5667252440d8300";
+const ARCX_VTOKEN = "0x777";
 const SHADOW = "0xabc";
 const PUBLIC = "0xdef";
 const DEPLOYED_AT = Date.parse("2026-10-20T00:00:00Z");
@@ -42,6 +45,25 @@ function client() {
       if (address === SHRINE && opts.topic0 === selectorOf("Melt")) {
         return { items: [event(address, opts.topic0, "0x1", 32), event(address, opts.topic0, "0x1", 9)], nextCursor:null };
       }
+      if (address === ABSORBER && opts.topic0 === selectorOf("Provide")) {
+        return {items:[event(address,opts.topic0,SHADOW,33)],nextCursor:null};
+      }
+      if (address === ABSORBER && opts.topic0 === selectorOf("Remove")) {
+        return {items:[event(address,opts.topic0,PUBLIC,34)],nextCursor:null};
+      }
+      if (address === ABSORBER && opts.topic0 === selectorOf("Reap")) {
+        return {items:[event(address,opts.topic0,SHADOW,35)],nextCursor:null};
+      }
+      if (address === ARCX_REGISTRY && opts.topic0 === selectorOf("VTokenAdded")) {
+        return {items:[event(address,opts.topic0,ARCX_VTOKEN,18)],nextCursor:null};
+      }
+      if (address === ARCX_REGISTRY && opts.topic0 === selectorOf("OmnichainVTokenAdded")) {
+        return {items:[],nextCursor:null};
+      }
+      if (address === ARCX_VTOKEN && opts.topic0 === selectorOf("Transfer")) {
+        return {items:[{...event(address,opts.topic0,PUBLIC,23),topic2:SHADOW,
+          keys:[opts.topic0,PUBLIC,SHADOW],data:["0xa","0x0"]}],nextCursor:null};
+      }
       throw Error("unexpected contract");
     },
   };
@@ -66,7 +88,7 @@ function mockFetch(input: string | URL | Request): Promise<Response> {
     {kind:"buy", txHash:"0x1", entryId:"1", actor:SHADOW, ts:DEPLOYED_AT/1000+3600, premiumUsd:12.5},
     {kind:"buy", txHash:"0x1", entryId:"1", actor:SHADOW, ts:DEPLOYED_AT/1000+3600, premiumUsd:12.5},
     {kind:"buy", txHash:"0x2", entryId:"1", actor:PUBLIC, ts:DEPLOYED_AT/1000+3600, premiumUsd:20},
-    {kind:"exercise", txHash:"0x3", actor:SHADOW, ts:DEPLOYED_AT/1000+3600},
+    {kind:"exercise", txHash:"0x3", entryId:"1", actor:SHADOW, ts:DEPLOYED_AT/1000+3600},
   ]));
   throw Error(`unexpected URL ${url}`);
 }
@@ -76,8 +98,8 @@ test("classifies finalized Opus collateral and debt actions by verified Trove ow
   const shadows = await loadShadowAccounts(source as never, 100);
   const result = await opusPositionActions(source as never, 100, shadows);
   assert.deepEqual({unit:result.unit, public:result.public, private:result.private},
-    {unit:"actions", public:3, private:4});
-  assert.deepEqual(result.privateDays, [{date:"2026-10-21",value:4}]);
+    {unit:"actions", public:4, private:6});
+  assert.deepEqual(result.privateDays, [{date:"2026-10-21",value:6}]);
 });
 
 test("ArcX paginates and deduplicates fills; Supervega counts purchase premiums only", async () => {
@@ -86,10 +108,12 @@ test("ArcX paginates and deduplicates fills; Supervega counts purchase premiums 
   assert.equal(arcx.private, 15);
   assert.equal(arcx.public, 25);
   assert.deepEqual(arcx.privateDays, [{date:"2026-10-21",value:15}]);
+  assert.deepEqual(arcx.privateActionDays, [{date:"2026-10-21",value:1}]);
   const supervega = await supervegaPremiums(mockFetch as typeof fetch, shadows);
   assert.equal(supervega.private, 12.5);
   assert.equal(supervega.public, 20);
   assert.deepEqual(supervega.privateDays, [{date:"2026-10-20",value:12.5}]);
+  assert.deepEqual(supervega.privateActionDays, [{date:"2026-10-20",value:2}]);
 });
 
 test("failed source never becomes a measured zero and expired figures are hidden", async () => {
@@ -99,6 +123,7 @@ test("failed source never becomes a measured zero and expired figures are hidden
   await service.refresh();
   assert.equal(service.snapshot().apps.opus.status,"live");
   assert.equal(service.snapshot().apps.arcx.private,15);
+  assert.deepEqual(service.snapshot().apps.arcx.privateActionDays,[{date:"2026-10-21",value:2}]);
   time += 11*60_000;
   assert.equal(service.snapshot().apps.arcx.status,"stale");
   assert.equal(service.snapshot().apps.arcx.private,null);

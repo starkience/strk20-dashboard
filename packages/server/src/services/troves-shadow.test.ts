@@ -2,7 +2,7 @@ import {test} from "node:test";
 import assert from "node:assert/strict";
 import {type RawContractEvent,selectorOf} from "@strk20/core";
 import {openCache} from "../cache/db.js";
-import {decodeVaultActivity,parseCatalogue,recordShadowAccount,recordVaultActivity,readState,saveState,
+import {decodeVaultActivity,parseCatalogue,recordShadowAccount,recordVaultActivity,recordVaultShareTransfer,readState,saveState,
   syncShadowStream,trovesShadowActivity,vaultStreamKey,SHADOW_ANONYMIZER,SHADOW_DEPLOYED,type StreamState} from "./troves-shadow.js";
 const CHAIN="SN_MAIN", VAULT="0x123", ACCOUNT="0xabc";
 const catalogue={vaults:[{address:VAULT,id:"test-vault",name:"Test vault"}],excludedStrategyIds:[]};
@@ -42,6 +42,15 @@ test("withdraw requests and claims are separate events and do not masquerade as 
     const result=trovesShadowActivity(db,CHAIN);assert.equal(result.transactionCount,2);
     assert.equal(result.eventCounts?.withdraw_request,1);assert.equal(result.eventCounts?.withdraw_claim,1);
     assert.equal("tvlUsd" in result,false);
+  }finally{db.close()}
+});
+test("share transfers reveal holders without inflating vault action counts",()=>{
+  const db=openCache(":memory:");try {
+    ready(db);deploy(db);
+    recordVaultShareTransfer(db,CHAIN,event({topic0:selectorOf("Transfer"),topic1:"0xdef",topic2:ACCOUNT,
+      keys:[selectorOf("Transfer"),"0xdef",ACCOUNT],data:["0x5","0x0"],eventName:"Transfer"}));
+    assert.equal(trovesShadowActivity(db,CHAIN).transactionCount,0);
+    assert.equal((db.prepare("SELECT COUNT(*) n FROM shadow_vault_events WHERE kind='share_transfer'").get() as {n:number}).n,1);
   }finally{db.close()}
 });
 test("unknown or failed ABI decoding is partial coverage, not a measured zero",()=>{

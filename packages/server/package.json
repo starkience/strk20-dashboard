@@ -19,6 +19,7 @@
     "build": "tsc"
   },
   "dependencies": {
+    "@ekubo/sdk": "0.0.10",
     "@hono/node-server": "^1.13.0",
     "@strk20/core": "workspace:*",
     "hono": "^4.6.0"

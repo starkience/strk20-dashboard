@@ -64,6 +64,9 @@ importers:
 
   packages/server:
     dependencies:
+      '@ekubo/sdk':
+        specifier: 0.0.10
+        version: 0.0.10
       '@hono/node-server':
         specifier: ^1.13.0
         version: 1.19.14(hono@4.12.23)
@@ -168,6 +171,9 @@ packages:
 
   '@dimforge/rapier3d-compat@0.12.0':
     resolution: {integrity: sha512-uekIGetywIgopfD97oDL5PfeezkFpNhwlzlaEYNOA0N6ghdsOvh/HYjSMek5Q2O1PYvRSDFcqFVJl4r4ZBwOow==}
+
+  '@ekubo/sdk@0.0.10':
+    resolution: {integrity: sha512-lH+gA6MBkvdC4xwyv6sBulHrewj6tu3lwShSoorVe6YBsCnd7QZOmNQ175JIfi2cZXruZ28A25SiyJ+3Z+2trA==}
 
   '@esbuild/aix-ppc64@0.21.5':
     resolution: {integrity: sha512-1SDgH6ZSPTlggy1yI6+Dbkiz8xzpHJEVAlF/AM1tHPLsf5STom9rwtjE4hKAF20FfXXNTFqEYXyJNWh1GiZedQ==}
@@ -1441,6 +1447,8 @@ snapshots:
       '@babel/helper-validator-identifier': 7.29.7
 
   '@dimforge/rapier3d-compat@0.12.0': {}
+
+  '@ekubo/sdk@0.0.10': {}
 
   '@esbuild/aix-ppc64@0.21.5':
     optional: true

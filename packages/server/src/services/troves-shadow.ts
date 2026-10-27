@@ -16,6 +16,7 @@ const KINDS: Record<string, string> = {
   RedeemRequested: "withdraw_request", RedeemClaimed: "withdraw_claim",
 };
 const TOPICS = [...Object.keys(KINDS), "ERC4626Event"].map(selectorOf);
+const TRANSFER_TOPIC = selectorOf("Transfer");
 const CATALOG_KEY = (chain: string) => `troves:catalog:${chain}`;
 const FACTORY_KEY = (chain: string) => `troves:factory:${chain}`;
 export interface Vault { address: string; id: string; name: string }
@@ -50,6 +51,9 @@ export function parseCatalogue(body: unknown): Catalogue {
 export function vaultStreamKey(chain: string, vaults: Vault[]): string {
   const addresses = [...new Set(vaults.map(v => normalizeHex(v.address)))].sort();
   return `troves:vaults:${chain}:${createHash("sha256").update(addresses.join(",")).digest("hex").slice(0,16)}`;
+}
+export function vaultTransferStreamKey(chain: string, vaults: Vault[]): string {
+  return vaultStreamKey(chain, vaults).replace("troves:vaults:", "troves:share-transfers:");
 }
 
 /** A fixed finalized upper bound survives every cursor-resume tick.
@@ -163,6 +167,26 @@ export function recordVaultActivity(db: Db, chain: string, e: RawContractEvent):
     .run(chain, normalizeHex(e.address), e.blockNumber, e.txIndex, e.logIndex, normalizeHex(e.txHash), e.timestampIso, kind, account);
 }
 
+/** A received share can be the only evidence of a shadow-owned position.
+ * Index ERC20 Transfer recipients separately from vault actions so mint
+ * events never double-count a deposit in the activity chart.
+ */
+export function recordVaultShareTransfer(db: Db, chain: string, e: RawContractEvent): void {
+  if (normalizeHex(e.topic0) !== TRANSFER_TOPIC || e.keys?.length !== 3 || e.data.length !== 2 || !e.topic2) {
+    throw Error("Invalid Troves share Transfer event");
+  }
+  const recipient = normalizeHex(e.topic2);
+  const owner = db.prepare("SELECT deployed_block FROM shadow_accounts WHERE chain=? AND address=?")
+    .get(chain, recipient) as {deployed_block:number}|undefined;
+  // A deterministic shadow address can receive shares before its deployment.
+  // Current balance still belongs to that shadow once deployment is finalized.
+  if (!owner) return;
+  db.prepare(`INSERT INTO shadow_vault_events(chain,vault,block_number,tx_index,log_index,tx_hash,timestamp_iso,kind,account)
+    VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(chain,vault,block_number,tx_index,log_index) DO NOTHING`)
+    .run(chain, normalizeHex(e.address), e.blockNumber, e.txIndex, e.logIndex,
+      normalizeHex(e.txHash), e.timestampIso, "share_transfer", recipient);
+}
+
 export async function syncTrovesShadow(opts: {
   db: Db; client: Pick<StarkscanClient,"status"|"globalEvents">; chain: string;
   fetchCatalogue?: () => Promise<unknown>; maxPages?: number;
@@ -194,7 +218,11 @@ export async function syncTrovesShadow(opts: {
   const vaults = await syncShadowStream({...common, key: vaultStreamKey(chain,catalogue.vaults),
     addresses:catalogue.vaults.map(v=>v.address), topics:TOPICS, fromBlock:first.first ?? head,
     consume:e=>recordVaultActivity(db,chain,e)});
-  return vaults.targetBlock === null;
+  if (vaults.targetBlock !== null) return false;
+  const transfers = await syncShadowStream({...common, key: vaultTransferStreamKey(chain,catalogue.vaults),
+    addresses:catalogue.vaults.map(v=>v.address), topics:[TRANSFER_TOPIC], fromBlock:0,
+    consume:e=>recordVaultShareTransfer(db,chain,e)});
+  return transfers.targetBlock === null;
 }
 
 export function trovesShadowActivity(db: Db, chain: string, now=Date.now()) {
@@ -223,7 +251,7 @@ export function trovesShadowActivity(db: Db, chain: string, now=Date.now()) {
   result.undecodedEventCount = Number(missed.n);
   const rows = db.prepare(`SELECT v.tx_hash,v.timestamp_iso,v.kind,v.account FROM shadow_vault_events v
     JOIN shadow_accounts a ON a.chain=v.chain AND a.address=v.account AND a.deployed_block<=v.block_number
-    WHERE v.chain=? AND v.vault IN (${params}) AND v.block_number<=? AND v.kind!='undecoded'
+    WHERE v.chain=? AND v.vault IN (${params}) AND v.block_number<=? AND v.kind NOT IN ('undecoded','share_transfer')
     ORDER BY v.block_number,v.tx_index,v.log_index`).all(chain,...list,covered) as {tx_hash:string;timestamp_iso:string;kind:string;account:string}[];
   const txs = new Set<string>(), accounts = new Set<string>();
   const events:Record<string,number> = {deposit:0,withdraw:0,withdraw_request:0,withdraw_claim:0};
