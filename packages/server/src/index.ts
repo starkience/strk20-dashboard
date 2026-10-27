@@ -17,6 +17,7 @@ import { createHandlers } from "./handlers.js";
 import { startTrovesShadowSync, trovesShadowActivity } from "./services/troves-shadow.js";
 import { createAppFlowService } from "./services/app-flows.js";
 import { createTrovesTvlService } from "./services/troves-tvl.js";
+import { createOpusCollateralService } from "./services/opus-collateral.js";
 import { startTokenSync } from "./services/token-sync.js";
 import { startVenueVerify } from "./services/venue-verify.js";
 import { startWalletClassify } from "./services/wallet-classify.js";
@@ -48,6 +49,7 @@ const starkscan = new StarkscanClient({
 const h = createHandlers({ db, events, views, heartbeats, starkscan, chain: CHAIN, pool: POOL });
 const appFlows = createAppFlowService({ client: starkscan, chain: CHAIN });
 const trovesTvl = createTrovesTvlService({ db, client: starkscan, chain: CHAIN });
+const opusCollateral = createOpusCollateralService({ client: starkscan, chain: CHAIN });
 
 const app = new Hono();
 app.use("/*", cors({ origin: CORS_ORIGIN }));
@@ -81,6 +83,7 @@ app.get("/agg/tvl-history", async (c) => c.json(await h.tvlHistory()));
 app.get("/agg/shielded-balance", async (c) => c.json(await h.shieldedBalance()));
 app.get("/agg/troves-shadow-activity", (c) => c.json(trovesShadowActivity(db, CHAIN)));
 app.get("/agg/troves-shadow-tvl", (c) => c.json(trovesTvl.snapshot()));
+app.get("/agg/opus-collateral", (c) => c.json(opusCollateral.snapshot()));
 app.get("/agg/app-flows", (c) => c.json(appFlows.snapshot()));
 app.get("/agg/routed-volume", async (c) => c.json(await h.routedVolume()));
 app.get("/agg/swap-by-token", async (c) => c.json(await h.swapVolumeByToken()));
@@ -202,6 +205,7 @@ runAutoSync().catch((e) => console.error("auto-sync failed:", e));
 startTrovesShadowSync({db, client:starkscan, chain:CHAIN});
 appFlows.start();
 trovesTvl.start();
+opusCollateral.start();
 
 // Token discovery + live USD pricing (Starkscan metadata and explorer quotes).
 startTokenSync({ db, starkscan, chain: CHAIN, pool: POOL });

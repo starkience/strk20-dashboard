@@ -116,6 +116,14 @@ Each app also reports `privateDays`, a daily series in that app's own unit.
 Opus's series is actions; Supervega and ArcX are USD. These different units
 must not be stacked on the same chart axis.
 
+`GET /agg/opus-collateral` reports current Opus Shrine collateral value in
+USD. It reads the Shrine's finalized aggregate health and the health of Troves
+opened by verified STRK20 shadow accounts at the same block. `private` sums
+those Troves' collateral; `public` is the Shrine total less that amount. The
+endpoint also exposes outstanding CASH debt for each slice. This is a current
+collateral stock, distinct from Opus's gross action counts and from the broader
+protocol TVL reported by DefiLlama. It is not added to the daily flow chart.
+
 `GET /agg/troves-shadow-tvl` values observed STRK20 shadow-account vault
 positions. It reads each observed account's finalized vault share balance and
 the vault's total share supply, then applies that fraction to the same vault's
