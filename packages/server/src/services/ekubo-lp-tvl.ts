@@ -10,6 +10,8 @@ import { fetchStarkscanMarketSnapshot } from "./starkscan-market.js";
 
 const EKUBO_API = "https://prod-api.ekubo.org";
 const LLAMA_URL = "https://api.llama.fi/protocol/ekubo";
+const LLAMA_COINS = "https://coins.llama.fi/prices/current/";
+const COINGECKO = "https://api.coingecko.com/api/v3/simple/token_price/starknet";
 const POSITIONS = normalizeHex("0x02e0af29598b407c8716b17f6d2795eca1b471413fa03fb145a5e33722184067");
 const CHAIN_ID = normalizeHex("0x534e5f4d41494e");
 const REFRESH_MS = 120_000;
@@ -23,11 +25,64 @@ interface Position {
   pool_state: {sqrt_ratio:string}|null;
 }
 type Values = {public:number; private:number; openPositions:number; accounts:number};
+type Quote = {priceUsd:number;decimals:number};
 
 async function json(fetchImpl:typeof fetch,url:string):Promise<any> {
   const response=await fetchImpl(url,{signal:AbortSignal.timeout(20_000)});
   if(!response.ok)throw Error(`Ekubo LP source HTTP ${response.status}`);
   return response.json();
+}
+
+function padded(address:string):string {
+  return `0x${BigInt(address).toString(16).padStart(64,"0")}`;
+}
+
+function recentQuote(price:unknown,decimals:unknown,timestampMs:number,now:number):Quote|null {
+  if(typeof price!=="number"||!Number.isFinite(price)||price<=0
+      ||typeof decimals!=="number"||!Number.isInteger(decimals)||decimals<0||decimals>36
+      ||!Number.isFinite(timestampMs)||timestampMs>now+60_000||now-timestampMs>STALE_MS)return null;
+  return {priceUsd:price,decimals};
+}
+
+async function tokenQuotes(addresses:string[],market:Awaited<ReturnType<typeof fetchStarkscanMarketSnapshot>>|null,
+    fetchImpl:typeof fetch,now:number):Promise<Map<string,Quote>> {
+  const quotes=new Map<string,Quote>();
+  for(const address of addresses){
+    const item=market?.tokens.get(address);
+    const quote=recentQuote(item?.priceUsd,item?.decimals,Date.parse(item?.updatedAtIso??""),now);
+    if(quote)quotes.set(address,quote);
+  }
+  let missing=addresses.filter(address=>!quotes.has(address));
+  let llamaCoins:Record<string,{price?:number;decimals?:number;timestamp?:number;confidence?:number}>={};
+  if(missing.length){
+    try{
+      const body=await json(fetchImpl,`${LLAMA_COINS}${missing.map(address=>`starknet:${padded(address)}`).join(",")}`);
+      if(body?.coins&&typeof body.coins==="object")llamaCoins=body.coins;
+    }catch{/* CoinGecko remains available when the coin feed fails. */}
+    for(const address of missing){
+      const item=llamaCoins[`starknet:${padded(address)}`];
+      if(item?.confidence!=null&&item.confidence<0.7)continue;
+      const quote=recentQuote(item?.price,item?.decimals,(item?.timestamp??NaN)*1000,now);
+      if(quote)quotes.set(address,quote);
+    }
+  }
+  missing=addresses.filter(address=>!quotes.has(address));
+  if(missing.length){
+    const results=await Promise.allSettled(missing.map(async address=>{
+      const uri=new URL(COINGECKO);
+      uri.searchParams.set("contract_addresses",padded(address));
+      uri.searchParams.set("vs_currencies","usd");
+      uri.searchParams.set("include_last_updated_at","true");
+      const body=await json(fetchImpl,uri.toString());
+      const item=body?.[padded(address)];
+      const decimals=market?.tokens.get(address)?.decimals??llamaCoins[`starknet:${padded(address)}`]?.decimals;
+      return {address,quote:recentQuote(item?.usd,decimals,(item?.last_updated_at??NaN)*1000,now)};
+    }));
+    for(const result of results)if(result.status==="fulfilled"&&result.value.quote)
+      quotes.set(result.value.address,result.value.quote);
+  }
+  if(addresses.some(address=>!quotes.has(address)))throw Error("Ekubo LP token quote unavailable or stale");
+  return quotes;
 }
 
 export async function measureEkuboLpTvl(opts:{db:Db;chain:string;fetchImpl?:typeof fetch;now?:()=>number}):Promise<Values> {
@@ -63,9 +118,10 @@ export async function measureEkuboLpTvl(opts:{db:Db;chain:string;fetchImpl?:type
   const active=[...positions.values()].filter(p=>BigInt(p.liquidity)>0n);
   const addresses=[...new Set(active.flatMap(p=>[p.pool_key.token0,p.pool_key.token1]).map(normalizeHex))];
   const [market,llama]=await Promise.all([
-    addresses.length?fetchStarkscanMarketSnapshot(addresses,{fetch:fetchImpl}):Promise.resolve(null),
+    addresses.length?fetchStarkscanMarketSnapshot(addresses,{fetch:fetchImpl}).catch(()=>null):Promise.resolve(null),
     json(fetchImpl,LLAMA_URL),
   ]);
+  const quotes=await tokenQuotes(addresses,market,fetchImpl,now());
   const latest=llama?.tvl?.at(-1);
   const total=llama?.currentChainTvls?.Starknet;
   if(!latest||!Number.isFinite(latest.date)||now()-latest.date*1000>48*60*60_000
@@ -82,12 +138,9 @@ export async function measureEkuboLpTvl(opts:{db:Db;chain:string;fetchImpl?:type
     const amount1=sqrt<=lower?0n:amount1Delta(lower,sqrt<upper?sqrt:upper,liquidity,false);
     for(const [address,raw] of [[p.pool_key.token0,amount0],[p.pool_key.token1,amount1]] as const){
       if(raw===0n)continue;
-      const quote=market?.tokens.get(normalizeHex(address));
-      const quoteTime=Date.parse(quote?.updatedAtIso??"");
-      if(!quote||!Number.isInteger(quote.decimals)||quote.decimals!<0||quote.decimals!>36
-          ||!Number.isFinite(quote.priceUsd)||quote.priceUsd!<=0||!Number.isFinite(quoteTime)
-          ||now()-quoteTime>STALE_MS||quoteTime>now()+60_000)throw Error("Ekubo LP token quote unavailable or stale");
-      privateUsd+=Number(raw)/10**quote.decimals!*quote.priceUsd!;
+      const quote=quotes.get(normalizeHex(address));
+      if(!quote)throw Error("Ekubo LP token quote unavailable or stale");
+      privateUsd+=Number(raw)/10**quote.decimals*quote.priceUsd;
     }
     owners.add(normalizeHex(p.owner!));
   }

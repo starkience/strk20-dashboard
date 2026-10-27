@@ -156,6 +156,9 @@ bounds, and current token quotes. The private row sums those positions; the
 public row subtracts them from DefiLlama's Starknet Ekubo TVL. Ekubo swaps
 remain in the separate routed-volume chart. Uncollected LP fees and positions
 owned by another account or staking contract are outside this LP snapshot.
+Token quotes are address matched and timestamp checked: stale Starkscan quotes
+fall back to DefiLlama coins, then CoinGecko. If none is recent, the figure is
+unavailable rather than a misleading zero.
 
 `GET /agg/endur-shadow-tvl` reports a matched current TVL split for Endur.
 It values Endur liquid staking tokens held by the STRK20 pool from a finalized
