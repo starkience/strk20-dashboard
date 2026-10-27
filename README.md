@@ -90,3 +90,29 @@ events. Unrecognized layouts produce `partial` coverage, never a claimed zero.
 The independent cursor store resumes fixed finalized block ranges across restarts.
 Clients should show numeric values only when `status` is `live`; `indexing`,
 `partial`, and `stale` preserve the distinction between zero and unavailable coverage.
+
+### Partner app flows
+
+`GET /agg/app-flows` compares two disjoint slices for Opus, Supervega, and ArcX:
+`public` excludes known STRK20 shadow accounts, while `private` counts activity
+by accounts deployed through the STRK20 mainnet shadow anonymizer. Shadow
+accounts are public pseudonyms; their app-side actions and amounts remain public.
+
+- Opus counts finalized collateral `Deposit` and `Withdraw` events from its
+  Abbot plus CASH `Forge` and `Melt` debt events from its Shrine. `TroveOpened`
+  binds each debt event's Trove ID to a verified owner. These are action counts,
+  not USD volume or current position balances. Mainnet addresses come from
+  [Opus's contracts repo](https://github.com/lindy-labs/opus_contracts#addresses).
+  Debt events before a verified ownership record are excluded from both rows.
+- Supervega sums `premiumUsd` on `buy` records in its
+  [public mainnet activity feed](https://supervega.app/api/activity?chain=mainnet).
+  Exercise records do not add another purchase premium.
+- ArcX sums USDC `quoteRaw` once per fill across its
+  [market catalogue](https://arcx-prod-strategy-cf.d.karnot.xyz/api/ct-markets)
+  and every fills cursor. A fill involving either shadow-account counterparty
+  belongs to the private slice.
+
+The endpoint serves no numeric value until it has a complete read from each
+source and the shadow deployment history. Values age out after ten minutes if a
+source stops responding. App feeds are partner-operated, so a changed response
+shape makes that app unavailable rather than reporting a false zero.
