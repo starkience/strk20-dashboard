@@ -132,7 +132,7 @@ undervaluing a newly minted position while Troves's catalogue TVL lags.
 Other vaults use the USD TVL in
 [Troves's strategy catalogue](https://app.troves.fi/api/strategies), because
 their strategy assets need more than a spot-token quote.
-The public row is the catalogue's tracked-vault TVL less the observed private
+The public row is the measured tracked-vault TVL less the observed private
 slice. The current scope includes shadow accounts seen in indexed Troves vault
 activity; positions acquired solely by share transfer are not yet attributed.
 The separate `/agg/troves-shadow-activity` endpoint supplies daily vault action
